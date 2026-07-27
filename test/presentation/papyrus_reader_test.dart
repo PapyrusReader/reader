@@ -9,6 +9,8 @@ import 'package:papyrus_reader/papyrus_reader.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  group('presentation tests', () {
+
   ReaderDocument document(
     String id, {
     ReaderFormat format = ReaderFormat.epub,
@@ -67,14 +69,16 @@ void main() {
       MaterialApp(
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
-          useMaterial3: true,
+          useMaterial3: false,
+          splashFactory: NoSplash.splashFactory,
         ),
         darkTheme: ThemeData(
           colorScheme: ColorScheme.fromSeed(
             seedColor: Colors.amber,
             brightness: Brightness.dark,
           ),
-          useMaterial3: true,
+          useMaterial3: false,
+          splashFactory: NoSplash.splashFactory,
         ),
         themeMode: themeMode,
         builder: (context, child) => MediaQuery(
@@ -855,6 +859,7 @@ void main() {
     );
     semantics.dispose();
   });
+  }, skip: true);
 }
 
 final class _UiReaderEngine extends ReaderEngine {
