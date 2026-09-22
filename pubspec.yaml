@@ -13,8 +13,10 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_html: ^3.0.0
-  html: ^0.15.6
-  pdfrx: ^2.4.7
+  # flutter_html 3.0.0 uses the private matches API removed in html 0.15.7.
+  html: 0.15.6
+  # 2.4.8 requires the PDF engine fixes for nullable native cache access.
+  pdfrx: ^2.4.8
 
 dev_dependencies:
   flutter_test:
