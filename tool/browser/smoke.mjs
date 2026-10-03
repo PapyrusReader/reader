@@ -103,6 +103,24 @@ try {
   assert.ok(beforeWheel && afterWheel && Math.abs(beforeWheel.y - afterWheel.y) < 1,
     'A normal paginated column must fit without hidden vertical overflow');
   await screenshot('desktop');
+  const hideControls = async () => {
+    await page.getByRole('button', { name: 'Hide controls', exact: true }).click();
+    await settle();
+    for (const name of ['Back', 'Reading settings', 'Table of contents', 'Next', 'Previous']) {
+      assert.equal(await page.getByRole('button', { name, exact: true }).count(), 0,
+        `${name} must be hidden in focus mode`);
+    }
+    await page.getByRole('button', { name: 'Show controls', exact: true }).waitFor();
+  };
+  await hideControls();
+  const focusedParagraph = await paragraph.boundingBox();
+  assert.ok(focusedParagraph && focusedParagraph.y < 850 &&
+    focusedParagraph.y + focusedParagraph.height > 0,
+    'Expanding the reading area must keep the current EPUB paragraph visible');
+  await screenshot('desktop-focus');
+  await page.keyboard.press('Escape');
+  await settle();
+  await page.getByRole('button', { name: 'Hide controls', exact: true }).waitFor();
   await page.setViewportSize({ width: 390, height: 844 });
   await settle();
   await page.getByRole('button', { name: 'Reading settings', exact: true }).click();
@@ -117,6 +135,10 @@ try {
   await page.getByRole('button', { name: 'Close panel', exact: true }).click();
   await settle();
   await screenshot('mobile-night');
+  await hideControls();
+  await screenshot('mobile-focus');
+  await page.getByRole('button', { name: 'Show controls', exact: true }).click();
+  await settle();
   await page.setViewportSize({ width: 700, height: 360 });
   await settle();
   await screenshot('landscape');
@@ -148,11 +170,12 @@ try {
   await settle();
   assert.ok(workersClosed >= 3, 'Document workers must close with their sessions');
 
-  // Crossing chapters must retain keyboard focus without a pointer refocus.
+  // Crossing chapters must retain keyboard focus in focus mode without pointer refocus.
   await page.setViewportSize({ width: 1280, height: 850 });
   await page.getByRole('button', { name: 'Read EPUB', exact: true }).click();
   await page.getByText('At the Gate', { exact: true }).first().waitFor();
   await settle();
+  await hideControls();
   for (let turn = 0; turn < 3; turn++) {
     await page.keyboard.press('ArrowRight');
     await page.getByText('After the Rain', { exact: true }).first().waitFor();
@@ -161,6 +184,8 @@ try {
     await page.getByText('At the Gate', { exact: true }).first().waitFor();
     await settle();
   }
+  await page.keyboard.press('Escape');
+  await settle();
   await page.getByRole('button', { name: 'Back', exact: true }).click();
   await settle();
   await page.setViewportSize({ width: 700, height: 360 });
@@ -175,6 +200,18 @@ try {
   await page.getByLabel(/Page 2 of 3/).waitFor();
   await settle();
   await screenshot('pdf');
+  await hideControls();
+  await page.getByText('Page 2 of 3.', { exact: true }).waitFor();
+  await screenshot('pdf-focus');
+  await page.keyboard.press('ArrowRight');
+  await page.getByText('Page 3 of 3.', { exact: true }).waitFor();
+  await settle();
+  await page.keyboard.press('ArrowLeft');
+  await page.getByText('Page 2 of 3.', { exact: true }).waitFor();
+  await settle();
+  await page.getByRole('button', { name: 'Show controls', exact: true }).click();
+  await settle();
+  await page.getByLabel(/Page 2 of 3/).waitFor();
   await page.getByRole('button', { name: 'Back', exact: true }).click();
   await settle();
   await page.getByRole('button', { name: 'Read PDF', exact: true }).click();
@@ -304,7 +341,7 @@ try {
   await settle();
   await page.getByRole('button', { name: 'Use light theme', exact: true }).waitFor();
   assert.deepEqual(errors, []);
-  console.log('Browser checks passed: worker protocol, chapter keyboard focus, responsive settings, local files, cleanup, PDF pagination/scroll, column/appearance refitting and opened menus under opposite app themes.');
+  console.log('Browser checks passed: worker protocol, focus mode and chapter keyboard focus, responsive settings, local files, cleanup, PDF pagination/scroll, column/appearance refitting and opened menus under opposite app themes.');
 } finally {
   await browser.close();
   await rm(temp, { recursive: true, force: true });

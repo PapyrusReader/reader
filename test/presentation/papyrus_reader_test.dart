@@ -99,6 +99,232 @@ void main() {
       );
     }
 
+    testWidgets('sidebar meets the toolbar border without an empty gap', (
+      tester,
+    ) async {
+      final controller = controllerFor([_UiReaderEngine()]);
+      addTearDown(controller.dispose);
+      await pumpReader(
+        tester,
+        document: document('Border'),
+        controller: controller,
+        size: const Size(1200, 1000),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Reading settings'));
+      await tester.pumpAndSettle();
+      final toolbar = tester.getRect(
+        find.byKey(const ValueKey('reader-toolbar')),
+      );
+      final border = tester.getRect(
+        find.byKey(const ValueKey('reader-toolbar-border')),
+      );
+      final panel = tester.getRect(
+        find.byKey(const ValueKey('reader-side-panel')),
+      );
+      expect(border.top, toolbar.bottom);
+      expect(border.height, 1);
+      expect(panel.top, border.bottom);
+      // The panel header keeps its border; text settings have no separator.
+      expect(
+        find.descendant(
+          of: find.byType(ListView),
+          matching: find.byType(Divider),
+        ),
+        findsNothing,
+      );
+    });
+
+    testWidgets(
+      'focus mode retains viewport and navigation on phone and desktop',
+      (tester) async {
+        for (final width in [390.0, 1200.0]) {
+          final engine = _UiReaderEngine();
+          final controller = controllerFor([engine]);
+          final book = document('Focus $width');
+          await pumpReader(
+            tester,
+            document: book,
+            controller: controller,
+            size: Size(width, 844),
+          );
+          await tester.pumpAndSettle();
+          final viewport = find.byKey(const ValueKey('reader-viewport'));
+          final element = tester.element(viewport);
+          final height = tester.getSize(viewport).height;
+          if (width > 720) {
+            await tester.tap(find.byTooltip('Reading settings'));
+            await tester.pumpAndSettle();
+          }
+          await tester.tap(find.byTooltip('Hide controls'));
+          await tester.pumpAndSettle();
+          expect(find.byKey(const ValueKey('reader-toolbar')), findsNothing);
+          expect(
+            find.byKey(const ValueKey('reader-progress-controls')),
+            findsNothing,
+          );
+          expect(find.byKey(const ValueKey('reader-side-panel')), findsNothing);
+          expect(find.byTooltip('Show controls'), findsOneWidget);
+          expect(tester.element(viewport), same(element));
+          expect(tester.getSize(viewport), Size(width, 844));
+          await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+          await tester.pumpAndSettle();
+          await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+          await tester.pumpAndSettle();
+          expect(engine.goNextCallCount, 1);
+          expect(engine.goPreviousCallCount, 1);
+          final locator = controller.snapshot.locator;
+          await tester.tap(find.byTooltip('Show controls'));
+          await tester.pumpAndSettle();
+          expect(tester.element(viewport), same(element));
+          expect(tester.getSize(viewport).height, height);
+          expect(controller.snapshot.locator, locator);
+          await tester.tap(find.byTooltip('Hide controls'));
+          await tester.pumpAndSettle();
+          await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+          await tester.pumpAndSettle();
+          expect(find.byTooltip('Reading settings'), findsOneWidget);
+          expect(find.byTooltip('Next'), findsOneWidget);
+          // Opening a different book must restore its exit/navigation controls.
+          await tester.tap(find.byTooltip('Hide controls'));
+          await tester.pumpAndSettle();
+          await pumpReader(
+            tester,
+            document: document('Replacement'),
+            controller: controllerFor([_UiReaderEngine()]),
+            size: Size(width, 844),
+          );
+          await tester.pumpAndSettle();
+          expect(find.byTooltip('Hide controls'), findsOneWidget);
+          final replacement = tester
+              .widget<PapyrusReader>(find.byType(PapyrusReader))
+              .controller!;
+          await tester.pumpWidget(const SizedBox.shrink());
+          replacement.dispose();
+          controller.dispose();
+        }
+      },
+    );
+
+    testWidgets(
+      'focus mode recovers page keys and Escape from a parked scope',
+      (tester) async {
+        final engine = _UiReaderEngine();
+        final controller = controllerFor([engine]);
+        addTearDown(controller.dispose);
+        await pumpReader(
+          tester,
+          document: document('Parked focus'),
+          controller: controller,
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('Hide controls'));
+        await tester.pumpAndSettle();
+        FocusManager.instance.rootScope.requestFocus();
+        await tester.pump();
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+        await tester.pumpAndSettle();
+        expect(engine.goNextCallCount, 1);
+        FocusManager.instance.rootScope.requestFocus();
+        await tester.pump();
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pumpAndSettle();
+        expect(find.byTooltip('Hide controls'), findsOneWidget);
+      },
+    );
+
+    testWidgets('focus mode does not intercept keys from a covering dialog', (
+      tester,
+    ) async {
+      final engine = _UiReaderEngine();
+      final controller = controllerFor([engine]);
+      addTearDown(controller.dispose);
+      await pumpReader(
+        tester,
+        document: document('Dialog focus'),
+        controller: controller,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Hide controls'));
+      await tester.pumpAndSettle();
+      final context = tester.element(find.byType(PapyrusReader));
+      final dialog = showDialog<void>(
+        context: context,
+        builder: (_) => const AlertDialog(content: TextField(autofocus: true)),
+      );
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pump();
+      expect(engine.goNextCallCount, 0);
+      FocusManager.instance.rootScope.requestFocus();
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pump();
+      expect(engine.goNextCallCount, 0);
+      Navigator.of(context).pop();
+      await tester.pumpAndSettle();
+      await dialog;
+      expect(find.byTooltip('Show controls'), findsOneWidget);
+    });
+
+    testWidgets(
+      'the controls toggle retains one accessible button through reflow',
+      (tester) async {
+        final semantics = tester.ensureSemantics();
+        final controller = controllerFor([_UiReaderEngine()]);
+        addTearDown(controller.dispose);
+        await pumpReader(
+          tester,
+          document: document('Accessible focus'),
+          controller: controller,
+        );
+        await tester.pumpAndSettle();
+        final before = tester
+            .getSemantics(find.bySemanticsLabel('Hide controls'))
+            .id;
+        await tester.tap(find.byTooltip('Hide controls'));
+        await tester.pumpAndSettle();
+        expect(
+          tester.getSemantics(find.bySemanticsLabel('Show controls')).id,
+          before,
+        );
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pumpAndSettle();
+        expect(
+          tester.getSemantics(find.bySemanticsLabel('Hide controls')).id,
+          before,
+        );
+        semantics.dispose();
+      },
+    );
+
+    testWidgets(
+      'custom toolbars can enter focus mode and restore with Escape',
+      (tester) async {
+        final controller = controllerFor([_UiReaderEngine()]);
+        addTearDown(controller.dispose);
+        await pumpReader(
+          tester,
+          document: document('Custom focus'),
+          controller: controller,
+          builders: ReaderUiBuilders(
+            toolbar: (context, state) => TextButton(
+              onPressed: state.toggleControls,
+              child: Text(state.controlsVisible ? 'Focus' : 'Controls'),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Focus'));
+        await tester.pumpAndSettle();
+        expect(find.text('Focus'), findsNothing);
+        expect(find.byTooltip('Show controls'), findsOneWidget);
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pumpAndSettle();
+        expect(find.text('Focus'), findsOneWidget);
+      },
+    );
+
     testWidgets('all settings dropdown routes follow the reading appearance', (
       tester,
     ) async {

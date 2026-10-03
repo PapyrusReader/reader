@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -60,6 +61,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
   Widget? _cachedViewport;
   ReaderPreferences? _viewportPreferences;
   _ReaderPanel _panel = _ReaderPanel.none;
+  bool _controlsVisible = true;
   double? _dragProgress;
   int _loadGeneration = 0;
   bool _loadedDependencies = false;
@@ -81,6 +83,9 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
   );
   FocusNode? _widePanelOpener;
   final FocusNode _readerFocusNode = FocusNode(debugLabel: 'reader navigation');
+  final FocusNode _controlsToggleFocusNode = FocusNode(
+    debugLabel: 'reader controls toggle',
+  );
 
   bool get _isCommandBusy => _pendingCommands > 0;
 
@@ -88,6 +93,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
   void initState() {
     super.initState();
     _attachController();
+    HardwareKeyboard.instance.addHandler(_handleUnfocusedReadingKey);
   }
 
   @override
@@ -119,9 +125,46 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
 
     if (controllerChanged || documentChanged) {
       _panel = _ReaderPanel.none;
+      _controlsVisible = true;
       _dragProgress = null;
       _loadDocument();
     }
+  }
+
+  Map<ShortcutActivator, VoidCallback> get _keyBindings => {
+    if (!_controlsVisible)
+      const SingleActivator(LogicalKeyboardKey.escape): _toggleControls,
+    const SingleActivator(LogicalKeyboardKey.arrowLeft): _goPrevious,
+    const SingleActivator(LogicalKeyboardKey.pageUp): _goPrevious,
+    const SingleActivator(LogicalKeyboardKey.arrowRight): _goNext,
+    const SingleActivator(LogicalKeyboardKey.pageDown): _goNext,
+    const SingleActivator(LogicalKeyboardKey.space): _goNext,
+    const SingleActivator(LogicalKeyboardKey.space, shift: true): _goPrevious,
+  };
+
+  bool _handleUnfocusedReadingKey(KeyEvent event) {
+    // Browser accessibility can park focus on a scope when chrome disappears.
+    // Only the active reader in focus mode may recover keys from that scope;
+    // focused inputs, other routes and normal reader shortcuts retain control.
+    final primaryFocus = FocusManager.instance.primaryFocus;
+    if (!mounted ||
+        _controlsVisible ||
+        _readerFocusNode.hasFocus ||
+        _controller.snapshot.status != ReaderStatus.ready ||
+        _compactPanelRoute != null ||
+        _panel != _ReaderPanel.none ||
+        ModalRoute.of(context)?.isCurrent != true ||
+        (primaryFocus != null && primaryFocus is! FocusScopeNode)) {
+      return false;
+    }
+    for (final entry in _keyBindings.entries) {
+      if (entry.key.accepts(event, HardwareKeyboard.instance)) {
+        _readerFocusNode.requestFocus();
+        entry.value();
+        return true;
+      }
+    }
+    return false;
   }
 
   void _attachController() {
@@ -254,7 +297,9 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
     _tocButtonFocusNode.dispose();
     _settingsButtonFocusNode.dispose();
     _widePanelFocusNode.dispose();
+    HardwareKeyboard.instance.removeHandler(_handleUnfocusedReadingKey);
     _readerFocusNode.dispose();
+    _controlsToggleFocusNode.dispose();
     _commandRevision.dispose();
     super.dispose();
   }
@@ -419,6 +464,33 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
     );
   }
 
+  void _toggleControls() {
+    _dismissCompactPanel();
+    setState(() {
+      _controlsVisible = !_controlsVisible;
+      _panel = _ReaderPanel.none;
+      _widePanelOpener = null;
+    });
+    unawaited(_restoreControlsFocus());
+  }
+
+  Future<void> _restoreControlsFocus() async {
+    // Wait for the chrome and its browser semantics to finish reflowing before
+    // restoring the view focus that removal of the toolbar can blur.
+    await WidgetsBinding.instance.endOfFrame;
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || _controller.snapshot.status != ReaderStatus.ready) return;
+    WidgetsBinding.instance.platformDispatcher.requestViewFocusChange(
+      viewId: View.of(context).viewId,
+      state: ui.ViewFocusState.focused,
+      direction: ui.ViewFocusDirection.undefined,
+    );
+    final focus = _controlsVisible && widget.builders.toolbar == null
+        ? _controlsToggleFocusNode
+        : _readerFocusNode;
+    focus.requestFocus();
+  }
+
   Widget _buildReady(
     BuildContext context,
     ReaderSnapshot snapshot,
@@ -434,6 +506,8 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
             snapshot: snapshot,
             onBack: widget.onBack,
             isBusy: _isCommandBusy,
+            toggleControls: _toggleControls,
+            controlsVisible: _controlsVisible,
             openTableOfContents: () => _openPanel(
               context,
               _ReaderPanel.tableOfContents,
@@ -446,107 +520,169 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
         );
 
         return CallbackShortcuts(
-          bindings: {
-            const SingleActivator(LogicalKeyboardKey.arrowLeft): _goPrevious,
-            const SingleActivator(LogicalKeyboardKey.pageUp): _goPrevious,
-            const SingleActivator(LogicalKeyboardKey.arrowRight): _goNext,
-            const SingleActivator(LogicalKeyboardKey.pageDown): _goNext,
-            const SingleActivator(LogicalKeyboardKey.space): _goNext,
-            const SingleActivator(LogicalKeyboardKey.space, shift: true):
-                _goPrevious,
-          },
+          bindings: _keyBindings,
           child: FocusTraversalGroup(
             policy: OrderedTraversalPolicy(),
             child: Focus(
               focusNode: _readerFocusNode,
+              // Engines and controls own the accessible reading content.
+              includeSemantics: false,
               autofocus: true,
-              child: Column(
+              child: Stack(
                 children: [
-                  FocusTraversalOrder(
-                    order: const NumericFocusOrder(1),
-                    child:
-                        toolbar ??
-                        _DefaultReaderToolbar(
-                          document: widget.document,
-                          onBack: widget.onBack,
-                          onTableOfContents: () => _openPanel(
-                            context,
-                            _ReaderPanel.tableOfContents,
-                            isWide,
-                            theme,
-                          ),
-                          onSettings: () => _openPanel(
-                            context,
-                            _ReaderPanel.settings,
-                            isWide,
-                            theme,
-                          ),
-                          tocFocusNode: _tocButtonFocusNode,
-                          settingsFocusNode: _settingsButtonFocusNode,
-                          theme: theme,
-                          isWide: isWide,
-                        ),
-                  ),
-                  SizedBox(
-                    height: 2,
-                    child: _isCommandBusy
-                        ? const LinearProgressIndicator(
-                            key: ValueKey('reader-command-progress'),
-                            minHeight: 2,
-                          )
-                        : null,
-                  ),
-                  if (_commandError case final error?)
-                    _ReaderCommandError(
-                      message: error,
-                      theme: theme,
-                      onDismiss: () => setState(() => _commandError = null),
-                    ),
-                  Expanded(
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: FocusTraversalOrder(
-                            order: const NumericFocusOrder(3),
-                            child: _buildViewport(context, snapshot),
-                          ),
-                        ),
-                        if (isWide && _panel != _ReaderPanel.none) ...[
-                          VerticalDivider(width: 1, color: theme.dividerColor),
-                          FocusTraversalOrder(
-                            order: const NumericFocusOrder(2),
-                            child: SizedBox(
-                              key: const ValueKey('reader-side-panel'),
-                              width: theme.sidePanelWidth,
-                              child: ColoredBox(
-                                color: theme.panelColor,
-                                child: _buildWidePanel(
+                  Column(
+                    children: [
+                      if (_controlsVisible)
+                        FocusTraversalOrder(
+                          key: const ValueKey('reader-toolbar'),
+                          order: const NumericFocusOrder(1),
+                          child:
+                              toolbar ??
+                              _DefaultReaderToolbar(
+                                document: widget.document,
+                                onBack: widget.onBack,
+                                onTableOfContents: () => _openPanel(
                                   context,
-                                  snapshot,
+                                  _ReaderPanel.tableOfContents,
+                                  isWide,
                                   theme,
+                                ),
+                                onSettings: () => _openPanel(
+                                  context,
+                                  _ReaderPanel.settings,
+                                  isWide,
+                                  theme,
+                                ),
+                                tocFocusNode: _tocButtonFocusNode,
+                                settingsFocusNode: _settingsButtonFocusNode,
+                                theme: theme,
+                                isWide: isWide,
+                              ),
+                        ),
+                      if (_controlsVisible)
+                        SizedBox(
+                          key: const ValueKey('reader-toolbar-border'),
+                          height: 1,
+                          child: _isCommandBusy
+                              ? const LinearProgressIndicator(
+                                  key: ValueKey('reader-command-progress'),
+                                  minHeight: 1,
+                                )
+                              : ColoredBox(color: theme.dividerColor),
+                        ),
+                      if (_commandError case final error?)
+                        _ReaderCommandError(
+                          message: error,
+                          theme: theme,
+                          onDismiss: () => setState(() => _commandError = null),
+                        ),
+                      Expanded(
+                        key: const ValueKey('reader-content'),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: FocusTraversalOrder(
+                                order: const NumericFocusOrder(3),
+                                child: _buildViewport(context, snapshot),
+                              ),
+                            ),
+                            if (isWide && _panel != _ReaderPanel.none) ...[
+                              VerticalDivider(
+                                width: 1,
+                                color: theme.dividerColor,
+                              ),
+                              FocusTraversalOrder(
+                                order: const NumericFocusOrder(2),
+                                child: SizedBox(
+                                  key: const ValueKey('reader-side-panel'),
+                                  width: theme.sidePanelWidth,
+                                  child: ColoredBox(
+                                    color: theme.panelColor,
+                                    child: _buildWidePanel(
+                                      context,
+                                      snapshot,
+                                      theme,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      if (_controlsVisible)
+                        FocusTraversalOrder(
+                          key: const ValueKey('reader-progress-controls'),
+                          order: const NumericFocusOrder(4),
+                          child: _ReaderProgressControls(
+                            progress:
+                                _dragProgress ?? _progressOf(snapshot.locator),
+                            locationLabel: snapshot.locationLabel,
+                            onProgressChanged: (value) {
+                              setState(() => _dragProgress = value);
+                            },
+                            onProgressChangeEnd: _goToProgress,
+                            onPrevious: _goPrevious,
+                            onNext: _goNext,
+                            enabled: !_isCommandBusy,
+                            theme: theme,
+                          ),
+                        ),
+                    ],
+                  ),
+                  if (toolbar == null || !_controlsVisible)
+                    PositionedDirectional(
+                      key: const ValueKey('reader-controls-toggle'),
+                      top: _controlsVisible
+                          ? (_readerToolbarHeight(context, theme, isWide) -
+                                    theme.minimumTargetSize) /
+                                2
+                          : 8,
+                      end: 8,
+                      child: ListenableBuilder(
+                        listenable: _controlsToggleFocusNode,
+                        builder: (context, _) {
+                          final label = _controlsVisible
+                              ? 'Hide controls'
+                              : 'Show controls';
+                          return Semantics(
+                            container: true,
+                            button: true,
+                            label: label,
+                            focusable: true,
+                            focused: _controlsToggleFocusNode.hasFocus,
+                            onTap: _toggleControls,
+                            onDidGainAccessibilityFocus:
+                                _controlsToggleFocusNode.requestFocus,
+                            excludeSemantics: true,
+                            child: Tooltip(
+                              message: label,
+                              excludeFromSemantics: true,
+                              child: Material(
+                                color: _controlsVisible
+                                    ? Colors.transparent
+                                    : theme.chromeColor,
+                                shape: const CircleBorder(),
+                                child: IconTheme(
+                                  data: IconThemeData(
+                                    color: theme.onChromeColor,
+                                  ),
+                                  child: _ReaderIconButton(
+                                    icon: _controlsVisible
+                                        ? Icons.fullscreen_rounded
+                                        : Icons.fullscreen_exit_rounded,
+                                    tooltip: null,
+                                    focusNode: _controlsToggleFocusNode,
+                                    onPressed: _toggleControls,
+                                    theme: theme,
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                        ],
-                      ],
+                          );
+                        },
+                      ),
                     ),
-                  ),
-                  FocusTraversalOrder(
-                    order: const NumericFocusOrder(4),
-                    child: _ReaderProgressControls(
-                      progress: _dragProgress ?? _progressOf(snapshot.locator),
-                      locationLabel: snapshot.locationLabel,
-                      onProgressChanged: (value) {
-                        setState(() => _dragProgress = value);
-                      },
-                      onProgressChangeEnd: _goToProgress,
-                      onPrevious: _goPrevious,
-                      onNext: _goNext,
-                      enabled: !_isCommandBusy,
-                      theme: theme,
-                    ),
-                  ),
                 ],
               ),
             ),
@@ -956,6 +1092,18 @@ final class _ReaderCommandError extends StatelessWidget {
   }
 }
 
+double _readerToolbarHeight(
+  BuildContext context,
+  ReaderThemeData theme,
+  bool isWide,
+) {
+  final textScale = MediaQuery.textScalerOf(context).scale(1);
+  return math.max(
+    isWide ? theme.wideToolbarHeight : theme.compactToolbarHeight,
+    theme.minimumTargetSize + math.max(8, (textScale - 1) * 12),
+  );
+}
+
 final class _DefaultReaderToolbar extends StatelessWidget {
   const _DefaultReaderToolbar({
     required this.document,
@@ -979,11 +1127,7 @@ final class _DefaultReaderToolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textScale = MediaQuery.textScalerOf(context).scale(1);
-    final height = math.max(
-      isWide ? theme.wideToolbarHeight : theme.compactToolbarHeight,
-      theme.minimumTargetSize + math.max(8, (textScale - 1) * 12),
-    );
+    final height = _readerToolbarHeight(context, theme, isWide);
 
     return Container(
       height: height,
@@ -1032,6 +1176,9 @@ final class _DefaultReaderToolbar extends StatelessWidget {
                 onPressed: onSettings,
                 theme: theme,
               ),
+              // The controls toggle stays mounted in the shell overlay during
+              // reflow, preserving browser accessibility and keyboard focus.
+              SizedBox(width: theme.minimumTargetSize),
             ],
           ),
         ),
@@ -1051,7 +1198,7 @@ final class _ReaderIconButton extends StatelessWidget {
   });
 
   final IconData icon;
-  final String tooltip;
+  final String? tooltip;
   final VoidCallback? onPressed;
   final ReaderThemeData theme;
   final FocusNode? focusNode;
@@ -1394,7 +1541,7 @@ final class _ReaderSettingsPanel extends StatelessWidget {
                     preferences.copyWith(pageMargins: EdgeInsets.all(value)),
                   ),
                 ),
-                const Divider(),
+                const SizedBox(height: 12),
               ],
               if (capabilities.supportsPagination ||
                   capabilities.supportsScrolling) ...[
