@@ -17,9 +17,12 @@ parent workspace's pinned wrappers when working from the Papyrus workspace.
   picking, malformed files, worker cleanup and real PDF navigation/resume.
   PDF checks switch Single/Double repeatedly, retain scale across Light/Night,
   and distinguish discrete paginated wheel turns from continuous intra-page scroll.
+  Opened reading-mode/typeface menus are reviewed under opposite app/reader themes.
 - The client is verified with a temporary sibling-reader path override: adapter,
   session, route and stable-document rebuild tests, analysis and web compilation.
   The override is removed afterward; publishing requires a committed reader pin.
+  Client theme tests use the actual light/dark/e-ink palettes, inspect opened menus
+  and label contrast on wide/mobile layouts, and change appearance in open panels.
 
 Run from this repository:
 

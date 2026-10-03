@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Rebuild reader Material colors consistently, including popup backgrounds and
+  host-defined field labels, while preserving typography, geometry and motion.
 - Process EPUB archives and chapters in cancellable native/browser workers.
 - Follow OPF spine order independently of TOC hierarchy and restore TOC anchors.
 - Add rich lazy pagination, adaptive spreads and page-first navigation.

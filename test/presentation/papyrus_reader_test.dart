@@ -99,6 +99,58 @@ void main() {
       );
     }
 
+    testWidgets('all settings dropdown routes follow the reading appearance', (
+      tester,
+    ) async {
+      for (final brightness in [Brightness.light, Brightness.dark]) {
+        for (final width in [600.0, 1200.0]) {
+          final controller = controllerFor([_UiReaderEngine()]);
+          await pumpReader(
+            tester,
+            document: document('Menu colors'),
+            controller: controller,
+            size: Size(width, 1000),
+            themeMode: brightness == Brightness.light
+                ? ThemeMode.dark
+                : ThemeMode.light,
+            initialPreferences: ReaderPreferences(brightness: brightness),
+          );
+          await tester.pumpAndSettle();
+          await tester.tap(find.byTooltip('Reading settings'));
+          await tester.pumpAndSettle();
+          for (final pair in [
+            ('System', 'Monospace'),
+            ('Paginated', 'Continuous scroll'),
+            ('Automatic', 'Double'),
+          ]) {
+            await tester.ensureVisible(find.text(pair.$1).first);
+            await tester.tap(find.text(pair.$1).first);
+            await tester.pumpAndSettle();
+            final option = find.text(pair.$2).last;
+            final menuTheme = Theme.of(tester.element(option));
+            expect(menuTheme.brightness, brightness);
+            expect(menuTheme.canvasColor, menuTheme.colorScheme.surface);
+            final text = tester.widget<RichText>(
+              find
+                  .descendant(of: option, matching: find.byType(RichText))
+                  .first,
+            );
+            final foreground = text.text.style!.color!.computeLuminance();
+            final background = menuTheme.canvasColor.computeLuminance();
+            expect(
+              (math.max(foreground, background) + .05) /
+                  (math.min(foreground, background) + .05),
+              greaterThanOrEqualTo(4.5),
+            );
+            await tester.tap(option);
+            await tester.pumpAndSettle();
+          }
+          await tester.pumpWidget(const SizedBox.shrink());
+          controller.dispose();
+        }
+      }
+    });
+
     testWidgets(
       'settings text follows reader appearance in opposite app themes',
       (tester) async {

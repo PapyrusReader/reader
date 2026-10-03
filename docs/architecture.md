@@ -68,3 +68,7 @@ Keyboard navigation has a persistent shell focus node and restores focus after
 chapter replacement when the command originated in the reading surface. Panels
 retain their own focus. Reader text/icon colors follow the selected appearance,
 including mobile sheets whose captured route theme would otherwise become stale.
+Material defaults are constructed from the reading palette rather than copying
+the host's resolved colors. This includes the legacy canvas color used by dropdown
+popup routes, field labels/borders and disabled controls. Host typography, control
+geometry, theme extensions and motion policy remain available to the reader.
