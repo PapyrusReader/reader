@@ -99,6 +99,43 @@ void main() {
       );
     }
 
+    testWidgets('custom snapshot viewports refresh without losing state', (
+      tester,
+    ) async {
+      final engine = _UiReaderEngine(
+        viewportBuilder: (context, snapshot) => _SnapshotViewport(
+          progression:
+              (snapshot.locator as EpubReaderLocator?)?.totalProgression ?? 0,
+        ),
+      );
+      final controller = controllerFor([engine]);
+      addTearDown(controller.dispose);
+      await pumpReader(
+        tester,
+        document: document('Custom viewport'),
+        controller: controller,
+      );
+      await tester.pumpAndSettle();
+      final viewport = find.byType(_SnapshotViewport);
+      final state = tester.state(viewport);
+      expect(find.text('Custom position 0'), findsOneWidget);
+
+      await controller.goToProgress(0.4);
+      await tester.pumpAndSettle();
+      expect(find.text('Custom position 40'), findsOneWidget);
+      expect(tester.state(viewport), same(state));
+
+      await controller.goToProgress(0.8);
+      await tester.pumpAndSettle();
+      expect(find.text('Custom position 80'), findsOneWidget);
+      expect(tester.state(viewport), same(state));
+
+      await tester.tap(find.byTooltip('Hide controls'));
+      await tester.pumpAndSettle();
+      expect(find.text('Custom position 80'), findsOneWidget);
+      expect(tester.state(viewport), same(state));
+    });
+
     testWidgets('sidebar meets the toolbar border without an empty gap', (
       tester,
     ) async {
@@ -1248,6 +1285,7 @@ void main() {
 
 final class _UiReaderEngine extends ReaderEngine {
   _UiReaderEngine({
+    this.viewportBuilder,
     this.loadGate,
     this.loadFailure,
     this.nextGates = const [],
@@ -1263,6 +1301,7 @@ final class _UiReaderEngine extends ReaderEngine {
   });
 
   final Completer<void>? loadGate;
+  final Widget Function(BuildContext, ReaderSnapshot)? viewportBuilder;
   final ReaderException? loadFailure;
   final List<Completer<void>> nextGates;
   final ReaderException? nextFailure;
@@ -1316,6 +1355,9 @@ final class _UiReaderEngine extends ReaderEngine {
 
   @override
   Widget buildViewport(BuildContext context) {
+    if (viewportBuilder case final builder?) {
+      return builder(context, snapshot);
+    }
     return const ColoredBox(
       key: ValueKey('reader-viewport'),
       color: Colors.transparent,
@@ -1442,4 +1484,19 @@ final class _UiReaderEngine extends ReaderEngine {
     isDisposed = true;
     super.dispose();
   }
+}
+
+final class _SnapshotViewport extends StatefulWidget {
+  const _SnapshotViewport({required this.progression});
+
+  final double progression;
+
+  @override
+  State<_SnapshotViewport> createState() => _SnapshotViewportState();
+}
+
+final class _SnapshotViewportState extends State<_SnapshotViewport> {
+  @override
+  Widget build(BuildContext context) =>
+      Text('Custom position ${(widget.progression * 100).toStringAsFixed(0)}');
 }
