@@ -14,6 +14,7 @@ import '../domain/reader_snapshot.dart';
 import '../domain/reader_toc_entry.dart';
 import '../domain/reader_types.dart';
 import '../engine/reader_engine_registry.dart';
+import 'reader_material_theme.dart';
 import 'reader_theme_data.dart';
 import 'reader_ui_builders.dart';
 
@@ -262,25 +263,9 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
   Widget build(BuildContext context) {
     final snapshot = _controller.snapshot;
     final ambient = Theme.of(context);
-    final colors = snapshot.status == ReaderStatus.ready
-        ? ColorScheme.fromSeed(
-            seedColor: ambient.colorScheme.primary,
-            brightness: snapshot.preferences.brightness,
-          )
-        : ambient.colorScheme;
-    final readerTheme = ambient.copyWith(
-      colorScheme: colors,
-      brightness: colors.brightness,
-      textTheme: ambient.textTheme.apply(
-        bodyColor: colors.onSurface,
-        displayColor: colors.onSurface,
-      ),
-      primaryTextTheme: ambient.primaryTextTheme.apply(
-        bodyColor: colors.onPrimary,
-        displayColor: colors.onPrimary,
-      ),
-      iconTheme: ambient.iconTheme.copyWith(color: colors.onSurface),
-    );
+    final readerTheme = snapshot.status == ReaderStatus.ready
+        ? buildReaderMaterialTheme(ambient, snapshot.preferences.brightness)
+        : ambient;
     final theme = widget.theme ?? ReaderThemeData.fromTheme(readerTheme);
     return Theme(
       data: readerTheme,
@@ -687,24 +672,11 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
           // Captured route themes are a snapshot. Appearance can change while
           // this sheet is open, so use the current reader theme on every update.
           final preferences = _controller.preferences;
-          final colors = ColorScheme.fromSeed(
-            seedColor: Theme.of(this.context).colorScheme.primary,
-            brightness: preferences.brightness,
+          final currentTheme = buildReaderMaterialTheme(
+            Theme.of(this.context),
+            preferences.brightness,
           );
-          final base = Theme.of(this.context);
-          final currentTheme = base.copyWith(
-            colorScheme: colors,
-            brightness: colors.brightness,
-            textTheme: base.textTheme.apply(
-              bodyColor: colors.onSurface,
-              displayColor: colors.onSurface,
-            ),
-            primaryTextTheme: base.primaryTextTheme.apply(
-              bodyColor: colors.onPrimary,
-              displayColor: colors.onPrimary,
-            ),
-            iconTheme: base.iconTheme.copyWith(color: colors.onSurface),
-          );
+          final colors = currentTheme.colorScheme;
           final panelTheme =
               widget.theme ?? ReaderThemeData.fromTheme(currentTheme);
           return Theme(

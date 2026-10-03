@@ -262,8 +262,49 @@ try {
   const scrollHorizontal = await pdfText().boundingBox();
   assert.ok(scrollHorizontal && Math.abs(scrollHorizontal.x - scrollNight.x) < 1,
     'A width-fitted continuous page must not require horizontal scrolling');
+
+  // Inspect opened popup routes under the opposite app/reader appearance.
+  // Closed dropdown text alone cannot detect a stale host canvas color.
+  await page.getByRole('button', { name: 'Close panel', exact: true }).click();
+  await settle();
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await settle();
+  await page.getByRole('button', { name: 'Use dark theme', exact: true }).click();
+  await settle();
+  await page.getByRole('button', { name: 'Read EPUB', exact: true }).click();
+  await page.getByRole('button', { name: 'Reading settings', exact: true }).waitFor();
+  await settle();
+  await page.getByRole('button', { name: 'Reading settings', exact: true }).click();
+  await settle();
+  await page.getByLabel('Light', { exact: true }).click();
+  await settle();
+  await page.getByRole('button', { name: /Reading mode/ }).click();
+  await page.getByRole('menuitem', { name: 'Continuous scroll', exact: true }).waitFor();
+  await settle();
+  await screenshot('dark-app-light-reader-menu');
+  await page.getByRole('menuitem', { name: 'Continuous scroll', exact: true }).click();
+  await settle();
+  await page.getByRole('button', { name: /Typeface/ }).click();
+  await page.getByRole('menuitem', { name: 'Sans serif', exact: true }).waitFor();
+  await settle();
+  await screenshot('dark-app-light-reader-typeface');
+  await page.getByRole('menuitem', { name: 'Sans serif', exact: true }).click();
+  await settle();
+  await page.getByLabel('Night', { exact: true }).click();
+  await settle();
+  await page.getByRole('button', { name: /Reading mode/ }).click();
+  await page.getByRole('menuitem', { name: 'Paginated', exact: true }).waitFor();
+  await settle();
+  await screenshot('dark-app-night-reader-menu');
+  await page.getByRole('menuitem', { name: 'Paginated', exact: true }).click();
+  await settle();
+  await page.getByRole('button', { name: 'Close panel', exact: true }).click();
+  await settle();
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await settle();
+  await page.getByRole('button', { name: 'Use light theme', exact: true }).waitFor();
   assert.deepEqual(errors, []);
-  console.log('Browser checks passed: worker protocol, chapter keyboard focus, responsive settings, local files, cleanup, PDF pagination/scroll and column/appearance refitting.');
+  console.log('Browser checks passed: worker protocol, chapter keyboard focus, responsive settings, local files, cleanup, PDF pagination/scroll, column/appearance refitting and opened menus under opposite app themes.');
 } finally {
   await browser.close();
   await rm(temp, { recursive: true, force: true });
