@@ -99,6 +99,95 @@ void main() {
       );
     }
 
+    testWidgets(
+      'settings text follows reader appearance in opposite app themes',
+      (tester) async {
+        for (final brightness in [Brightness.dark, Brightness.light]) {
+          final engine = _UiReaderEngine();
+          final controller = controllerFor([engine]);
+          final preferences = ReaderPreferences(brightness: brightness);
+          await pumpReader(
+            tester,
+            document: document('Opposite theme'),
+            controller: controller,
+            size: const Size(1200, 800),
+            themeMode: brightness == Brightness.dark
+                ? ThemeMode.light
+                : ThemeMode.dark,
+            initialPreferences: preferences,
+          );
+          await tester.pumpAndSettle();
+          await tester.tap(find.byTooltip('Reading settings'));
+          await tester.pumpAndSettle();
+          final label = find.text('Page appearance');
+          final theme = Theme.of(tester.element(label));
+          expect(theme.brightness, brightness);
+          final rich = tester.widget<RichText>(
+            find.descendant(of: label, matching: find.byType(RichText)),
+          );
+          expect(rich.text.style!.color, theme.colorScheme.onSurface);
+          final dropdown = find.text('Paginated');
+          final dropdownText = tester.widget<RichText>(
+            find
+                .descendant(of: dropdown, matching: find.byType(RichText))
+                .first,
+          );
+          expect(dropdownText.text.style!.color, theme.colorScheme.onSurface);
+          for (final chip in tester.widgetList<ChoiceChip>(
+            find.byType(ChoiceChip),
+          )) {
+            final label = find.text((chip.label as Text).data!);
+            final text = tester.widget<RichText>(
+              find.descendant(of: label, matching: find.byType(RichText)).first,
+            );
+            final foreground = text.text.style!.color!.computeLuminance();
+            final background = chip.color!.resolve({
+              if (chip.selected) WidgetState.selected,
+            })!.computeLuminance();
+            final contrast =
+                (math.max(foreground, background) + .05) /
+                (math.min(foreground, background) + .05);
+            expect(
+              contrast,
+              greaterThanOrEqualTo(4.5),
+              reason: 'Every appearance option must stay readable',
+            );
+          }
+          await tester.pumpWidget(const SizedBox.shrink());
+          controller.dispose();
+        }
+      },
+    );
+
+    testWidgets(
+      'an open mobile panel updates its theme when Night is selected',
+      (tester) async {
+        final engine = _UiReaderEngine();
+        final controller = controllerFor([engine]);
+        addTearDown(controller.dispose);
+        await pumpReader(
+          tester,
+          document: document('Live sheet'),
+          controller: controller,
+          size: const Size(600, 1000),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('Reading settings'));
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.text('Night'));
+        await tester.tap(find.text('Night'));
+        await tester.pumpAndSettle();
+        final label = find.text('Page appearance');
+        final theme = Theme.of(tester.element(label));
+        expect(theme.brightness, Brightness.dark);
+        final rich = tester.widget<RichText>(
+          find.descendant(of: label, matching: find.byType(RichText)),
+        );
+        expect(rich.text.style!.color, theme.colorScheme.onSurface);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
     testWidgets('moves from a usable loading state to the engine viewport', (
       tester,
     ) async {
@@ -338,7 +427,7 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('wide chrome reserves a stable persistent panel', (
+    testWidgets('wide chrome uses the full viewport until a panel is opened', (
       tester,
     ) async {
       final engine = _UiReaderEngine();
@@ -355,6 +444,7 @@ void main() {
       final viewportBefore = tester.getSize(
         find.byKey(const ValueKey('reader-viewport')),
       );
+      expect(find.byKey(const ValueKey('reader-side-panel')), findsNothing);
       await tester.tap(find.byTooltip('Table of contents'));
       await tester.pumpAndSettle();
       final viewportAfter = tester.getSize(
@@ -364,11 +454,18 @@ void main() {
       expect(find.byType(BottomSheet), findsNothing);
       expect(find.byKey(const ValueKey('reader-side-panel')), findsOneWidget);
       expect(find.text('Chapter one'), findsOneWidget);
-      expect(viewportAfter, viewportBefore);
+      expect(viewportAfter.width, lessThan(viewportBefore.width));
+      expect(viewportAfter.height, viewportBefore.height);
 
       await tester.tap(find.byTooltip('Reading settings'));
       await tester.pumpAndSettle();
       expect(find.text('Reading mode'), findsOneWidget);
+      expect(
+        tester.getSize(find.byKey(const ValueKey('reader-viewport'))),
+        viewportAfter,
+      );
+      await tester.tap(find.byTooltip('Close panel'));
+      await tester.pumpAndSettle();
       expect(
         tester.getSize(find.byKey(const ValueKey('reader-viewport'))),
         viewportBefore,
@@ -868,7 +965,7 @@ void main() {
       );
       semantics.dispose();
     });
-  }, skip: true);
+  });
 }
 
 final class _UiReaderEngine extends ReaderEngine {

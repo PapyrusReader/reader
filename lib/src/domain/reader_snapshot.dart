@@ -22,6 +22,8 @@ sealed class ReaderSnapshot {
   ReaderCapabilities? get capabilities;
 
   ReaderException? get error;
+
+  String? get locationLabel => null;
 }
 
 final class ReaderIdleSnapshot extends ReaderSnapshot {
@@ -85,10 +87,14 @@ final class ReaderReadySnapshot extends ReaderSnapshot {
     required this.capabilities,
     this.locator,
     List<ReaderTocEntry> toc = const [],
+    this.locationLabel,
   }) : toc = List.unmodifiable(toc);
 
   @override
   ReaderStatus get status => ReaderStatus.ready;
+
+  @override
+  final String? locationLabel;
 
   @override
   final ReaderDocument document;

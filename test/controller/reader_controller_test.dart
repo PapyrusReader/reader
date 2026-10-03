@@ -222,7 +222,7 @@ void main() {
       expect(controller.buildViewport(FakeBuildContext()), isA<SizedBox>());
     });
 
-    test('serializes overlapping loads and leaves the second ready', () async {
+    test('a new load completes without waiting for an obsolete load', () async {
       final firstDocument = makeDocument('first');
       final secondDocument = makeDocument('second');
       final firstGate = Completer<void>();
@@ -254,11 +254,13 @@ void main() {
 
       expect(controller.snapshot.status, ReaderStatus.loading);
       expect(controller.snapshot.document, same(secondDocument));
-      expect(secondEngine.loadedDocuments, isEmpty);
-
+      await secondLoad;
+      expect(firstEngine.isDisposed, isTrue);
+      expect(controller.snapshot.document, same(secondDocument));
+      expect(controller.snapshot.status, ReaderStatus.ready);
+      expect(firstEngine.activeLoadCount, 1);
       firstGate.complete();
       await firstLoad;
-      await secondLoad;
 
       expect(firstEngine.loadedDocuments, [firstDocument]);
       expect(secondEngine.loadedDocuments, [secondDocument]);

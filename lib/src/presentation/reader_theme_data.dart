@@ -13,8 +13,8 @@ final class ReaderThemeData {
     required this.dividerColor,
     this.compactBreakpoint = 720,
     this.sidePanelWidth = 320,
-    this.compactToolbarHeight = 64,
-    this.wideToolbarHeight = 72,
+    this.compactToolbarHeight = 56,
+    this.wideToolbarHeight = 64,
     this.minimumTargetSize = 48,
     this.panelPadding = 16,
   });

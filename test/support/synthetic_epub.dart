@@ -6,6 +6,8 @@ Uint8List syntheticEpub({
   bool malicious = false,
   bool longChapter = false,
   String? firstChapterBody,
+  String? secondChapterBody,
+  bool reversedToc = false,
   bool corruptSecondChapter = false,
 }) {
   final repeated = longChapter
@@ -91,7 +93,7 @@ Uint8List syntheticEpub({
  <navMap>
   <navPoint id="one" playOrder="1">
    <navLabel><text>Chapter One</text></navLabel>
-   <content src="text/chapter1.xhtml"/>
+   <content src="text/chapter${reversedToc ? 3 : 1}.xhtml"/>
    <navPoint id="one-a" playOrder="2">
     <navLabel><text>Part A</text></navLabel>
     <content src="text/chapter2.xhtml#part-a"/>
@@ -99,7 +101,7 @@ Uint8List syntheticEpub({
   </navPoint>
   <navPoint id="two" playOrder="3">
    <navLabel><text>Chapter Two</text></navLabel>
-   <content src="text/chapter3.xhtml"/>
+   <content src="text/chapter${reversedToc ? 1 : 3}.xhtml"/>
   </navPoint>
  </navMap>
 </ncx>'''),
@@ -112,7 +114,7 @@ Uint8List syntheticEpub({
       'OEBPS/text/chapter2.xhtml': utf8.encode(
         '''
 <html xmlns="http://www.w3.org/1999/xhtml"><head><title>Two</title></head>
-<body><h1>Chapter Two</h1>${longChapter ? repeated : '<p>Second chapter body.</p>'}</body></html>''',
+<body>${secondChapterBody ?? '<h1>Chapter Two</h1>${longChapter ? repeated : '<p>Second chapter body.</p>'}'}</body></html>''',
       ),
     'OEBPS/text/chapter3.xhtml': utf8.encode(
       '''

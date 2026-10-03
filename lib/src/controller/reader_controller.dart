@@ -27,7 +27,7 @@ final class ReaderController extends ChangeNotifier {
 
   ReaderEngine? _engine;
   ReaderSnapshot _snapshot;
-  Future<void> _loadQueue = Future<void>.value();
+  final Set<ReaderEngine> _loadingEngines = {};
   int _latestLoadId = 0;
   bool _isDisposed = false;
 
@@ -53,6 +53,10 @@ final class ReaderController extends ChangeNotifier {
       );
     }
 
+    for (final candidate in _loadingEngines.toList()) {
+      candidate.dispose();
+    }
+    _loadingEngines.clear();
     final request = _ReaderLoadRequest(
       id: ++_latestLoadId,
       document: document,
@@ -67,23 +71,20 @@ final class ReaderController extends ChangeNotifier {
       ),
     );
 
-    final operation = _loadQueue.then((_) => _performLoad(request));
-    _loadQueue = operation.then<void>(
-      (_) {},
-      onError: (Object _, StackTrace _) {},
-    );
-
-    return operation;
+    // Give the shell a chance to paint loading chrome. A newer request owns an
+    // independent engine and never waits for an obsolete file read.
+    return Future<void>.microtask(() => _performLoad(request));
   }
 
   Future<void> _performLoad(_ReaderLoadRequest request) async {
-    if (_isDisposed) {
+    if (!_canPublish(request)) {
       return;
     }
 
     ReaderEngine? candidate;
     try {
       candidate = _registry.resolve(request.document.format);
+      _loadingEngines.add(candidate);
 
       await candidate.load(
         request.document,
@@ -95,16 +96,20 @@ final class ReaderController extends ChangeNotifier {
         _selectEngine(candidate);
         _publish(candidate.snapshot);
       } else {
-        candidate.dispose();
+        if (_loadingEngines.remove(candidate)) candidate.dispose();
       }
     } on ReaderException catch (error) {
-      if (candidate != null && !identical(candidate, _engine)) {
+      if (candidate != null &&
+          _loadingEngines.remove(candidate) &&
+          !identical(candidate, _engine)) {
         candidate.dispose();
       }
       _publishLoadError(request, error);
       rethrow;
     } catch (error, stackTrace) {
-      if (candidate != null && !identical(candidate, _engine)) {
+      if (candidate != null &&
+          _loadingEngines.remove(candidate) &&
+          !identical(candidate, _engine)) {
         candidate.dispose();
       }
       final readerError = ReaderException(
@@ -115,6 +120,8 @@ final class ReaderController extends ChangeNotifier {
       _publishLoadError(request, readerError);
 
       Error.throwWithStackTrace(readerError, stackTrace);
+    } finally {
+      _loadingEngines.remove(candidate);
     }
   }
 
@@ -256,6 +263,10 @@ final class ReaderController extends ChangeNotifier {
 
     _isDisposed = true;
     _latestLoadId++;
+    for (final candidate in _loadingEngines) {
+      candidate.dispose();
+    }
+    _loadingEngines.clear();
     final engine = _engine;
     _engine = null;
     engine?.removeListener(_syncFromEngine);

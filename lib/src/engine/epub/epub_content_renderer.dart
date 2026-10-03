@@ -35,6 +35,20 @@ final class FlutterHtmlEpubContentRenderer implements EpubContentRenderer {
           ),
           child: Html(
             data: xhtml,
+            style: {
+              'body': Style(
+                color: preferences.foregroundColor,
+                backgroundColor: preferences.backgroundColor,
+                fontFamily: preferences.fontFamily,
+                fontSize: FontSize(preferences.fontSize),
+                lineHeight: LineHeight(preferences.lineHeight),
+                letterSpacing: preferences.letterSpacing,
+                margin: Margins.zero,
+              ),
+              'p': Style(
+                margin: Margins.only(bottom: preferences.paragraphSpacing),
+              ),
+            },
             shrinkWrap: true,
             doNotRenderTheseTags: const {
               'script',
@@ -61,6 +75,7 @@ final class EpubScrollViewport extends StatefulWidget {
     required this.restorationRevision,
     required this.renderer,
     required this.onProgressChanged,
+    this.controller,
   });
 
   final String xhtml;
@@ -69,6 +84,7 @@ final class EpubScrollViewport extends StatefulWidget {
   final int restorationRevision;
   final EpubContentRenderer renderer;
   final ValueChanged<double> onProgressChanged;
+  final ScrollController? controller;
 
   @override
   State<EpubScrollViewport> createState() => _EpubScrollViewportState();
@@ -81,7 +97,7 @@ final class _EpubScrollViewportState extends State<EpubScrollViewport> {
   @override
   void initState() {
     super.initState();
-    _controller = ScrollController();
+    _controller = widget.controller ?? ScrollController();
     _restoreProgress();
   }
 
@@ -133,7 +149,7 @@ final class _EpubScrollViewportState extends State<EpubScrollViewport> {
 
   @override
   void dispose() {
-    _controller.dispose();
+    if (widget.controller == null) _controller.dispose();
     super.dispose();
   }
 

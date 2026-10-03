@@ -1,3 +1,4 @@
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:papyrus_reader/papyrus_reader.dart';
@@ -7,9 +8,10 @@ void main() {
 }
 
 final class PapyrusReaderDemoApp extends StatefulWidget {
-  const PapyrusReaderDemoApp({this.memory, super.key});
+  const PapyrusReaderDemoApp({this.memory, this.registry, super.key});
 
   final DemoReaderMemory? memory;
+  final ReaderEngineRegistry? registry;
 
   @override
   State<PapyrusReaderDemoApp> createState() => _PapyrusReaderDemoAppState();
@@ -43,6 +45,7 @@ final class _PapyrusReaderDemoAppState extends State<PapyrusReaderDemoApp> {
           });
         },
         memory: _memory,
+        registry: widget.registry,
       ),
     );
   }
@@ -84,6 +87,7 @@ final class _DemoLibrary extends StatelessWidget {
     required this.isDark,
     required this.toggleTheme,
     required this.memory,
+    this.registry,
   });
 
   static const documents = [
@@ -99,11 +103,22 @@ final class _DemoLibrary extends StatelessWidget {
       actionLabel: 'Read EPUB',
     ),
     _DemoDocument(
+      id: 'reading-lab',
+      title: 'The Reading Lab',
+      author: 'Papyrus Studio',
+      description:
+          'Long chapters with rich text for testing page turns, reflow and resume.',
+      format: ReaderFormat.epub,
+      assetPath: 'assets/reading_lab.epub',
+      icon: Icons.chrome_reader_mode_rounded,
+      actionLabel: 'Explore layouts',
+    ),
+    _DemoDocument(
       id: 'tiny-pdf',
       title: 'A Tiny PDF',
       author: 'Papyrus Studio',
       description:
-          'One valid, pocket-sized page for trying fixed document reading.',
+          'Three pocket-sized pages for trying navigation and PDF resume.',
       format: ReaderFormat.pdf,
       assetPath: 'assets/a_tiny_pdf.pdf',
       icon: Icons.picture_as_pdf_rounded,
@@ -114,6 +129,7 @@ final class _DemoLibrary extends StatelessWidget {
   final bool isDark;
   final VoidCallback toggleTheme;
   final DemoReaderMemory memory;
+  final ReaderEngineRegistry? registry;
 
   @override
   Widget build(BuildContext context) {
@@ -123,6 +139,11 @@ final class _DemoLibrary extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Papyrus Reader'),
         actions: [
+          IconButton(
+            tooltip: 'Open a book',
+            icon: const Icon(Icons.folder_open_rounded),
+            onPressed: () => _openFile(context),
+          ),
           IconButton(
             tooltip: isDark ? 'Use light theme' : 'Use dark theme',
             onPressed: toggleTheme,
@@ -251,6 +272,7 @@ final class _DemoLibrary extends StatelessWidget {
       MaterialPageRoute<void>(
         builder: (context) => PapyrusReader(
           document: readerDocument,
+          registry: registry,
           initialLocator: memory.locatorFor(demo.id),
           initialPreferences: memory.preferencesFor(demo.id),
           onBack: () => Navigator.of(context).pop(),
@@ -260,6 +282,58 @@ final class _DemoLibrary extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _openFile(BuildContext context) async {
+    try {
+      final file = await openFile(
+        acceptedTypeGroups: const [
+          XTypeGroup(
+            label: 'Books',
+            extensions: ['epub', 'pdf'],
+            mimeTypes: ['application/epub+zip', 'application/pdf'],
+            uniformTypeIdentifiers: [
+              'org.idpf.epub-container',
+              'com.adobe.pdf',
+            ],
+          ),
+        ],
+      );
+      if (file == null || !context.mounted) return;
+      final extension = file.name.split('.').last.toLowerCase();
+      if (extension != 'epub' && extension != 'pdf') {
+        throw const FormatException('Choose an EPUB or PDF document.');
+      }
+      final id =
+          'file:${file.name}:${await file.length()}:${await file.lastModified()}';
+      if (!context.mounted) return;
+      final document = ReaderDocument(
+        id: id,
+        title: file.name,
+        format: extension == 'epub' ? ReaderFormat.epub : ReaderFormat.pdf,
+        loadBytes: file.readAsBytes,
+      );
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (context) => PapyrusReader(
+            document: document,
+            registry: registry,
+            initialLocator: memory.locatorFor(id),
+            initialPreferences: memory.preferencesFor(id),
+            onLocatorChanged: (locator) => memory.saveLocator(id, locator),
+            onPreferencesChanged: (preferences) =>
+                memory.savePreferences(id, preferences),
+            onBack: () => Navigator.of(context).pop(),
+          ),
+        ),
+      );
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not open the file: $error')),
+        );
+      }
+    }
   }
 
   Future<Uint8List> _loadAsset(String path) async {
