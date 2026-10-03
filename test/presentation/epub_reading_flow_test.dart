@@ -7,6 +7,63 @@ import '../support/in_process_epub_worker.dart';
 import '../support/synthetic_epub.dart';
 
 void main() {
+  testWidgets('hiding chrome keeps a long EPUB on its current content offset', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1280, 850);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final engine = testEpubEngine();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PapyrusReader(
+          registry: ReaderEngineRegistry([
+            ReaderEngineRegistration(
+              formats: const {ReaderFormat.epub},
+              factory: () => engine,
+            ),
+          ]),
+          document: ReaderDocument(
+            id: 'focus',
+            format: ReaderFormat.epub,
+            loadBytes: () async => syntheticEpub(longChapter: true),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await engine.goNext();
+    await tester.pumpAndSettle();
+    await engine.goNext();
+    await tester.pumpAndSettle();
+    final before = await engine.currentLocator() as EpubReaderLocator;
+    expect(before.textOffset, greaterThan(0));
+    await tester.tap(find.byTooltip('Hide controls'));
+    await tester.pumpAndSettle();
+    expect(
+      (await engine.currentLocator() as EpubReaderLocator).textOffset,
+      before.textOffset,
+    );
+    expect(
+      tester.widget<PageView>(find.byType(PageView)).controller!.page,
+      greaterThan(0),
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Hide controls'), findsOneWidget);
+    expect(
+      (await engine.currentLocator() as EpubReaderLocator).textOffset,
+      before.textOffset,
+    );
+    expect(
+      tester.widget<PageView>(find.byType(PageView)).controller!.page,
+      greaterThan(0),
+    );
+    semantics.dispose();
+  });
+
   testWidgets('arrow navigation stays focused across consecutive chapters', (
     tester,
   ) async {

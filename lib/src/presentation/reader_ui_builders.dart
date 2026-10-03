@@ -21,6 +21,8 @@ final class ReaderToolbarContext {
     required this.openSettings,
     this.onBack,
     this.isBusy = false,
+    this.toggleControls,
+    this.controlsVisible = true,
   });
 
   final ReaderDocument document;
@@ -29,6 +31,10 @@ final class ReaderToolbarContext {
   final VoidCallback openTableOfContents;
   final VoidCallback openSettings;
   final bool isBusy;
+
+  /// Hide or restore reader chrome without changing the reading position.
+  final VoidCallback? toggleControls;
+  final bool controlsVisible;
 }
 
 final class ReaderPanelContext {

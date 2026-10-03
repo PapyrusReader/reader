@@ -46,6 +46,13 @@ provided `ReaderController` remains host-owned. With an external controller,
 omitted initial preferences remain controller-owned; an explicit value
 overrides them for the document load.
 
+Use **Hide controls** in the toolbar for distraction-free reading. Both bars
+collapse, expanding the page area without reopening the document. Page-turn
+keys, EPUB swipes and PDF scrolling remain available. The small **Show controls**
+button in the top corner or **Escape** restores the bars. This is temporary UI
+state; opening another document restores the controls. Custom toolbar builders
+can expose `ReaderToolbarContext.toggleControls`.
+
 ## Example
 
 ```bash
