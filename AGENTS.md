@@ -2,7 +2,7 @@
 
 This is an independent Flutter package and Git repository. The owning workspace
 is one level up; use its `tools/flutter` and `tools/dart` SDK wrappers when present.
-Read `docs/reader-plan.md` before changing architecture or expanding formats.
+Read `docs/architecture.md` before changing architecture or expanding formats.
 
 - Domain types are host-facing and serializable. Keep version-1 locators readable.
   EPUB content offsets are chapter-local normalized UTF-16 offsets, never page
@@ -15,7 +15,7 @@ Read `docs/reader-plan.md` before changing architecture or expanding formats.
 - Rebuild `assets/epub_worker.js` with `tool/build_epub_worker.sh` after modifying
   worker source. The packaged JS lets dependent applications build without a
   manual worker generation step. CI checks the generated asset for drift.
-  This private repository commits `pubspec.lock` and pins its CI SDK so the
+  This package commits `pubspec.lock` and pins its CI SDK so the
   browser worker and third-party notices are reproducible.
 - UI text measurement belongs in Flutter. Preserve semantic runs, Unicode,
   illustrations and content offsets when reflowing. Layout must use the space

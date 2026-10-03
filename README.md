@@ -72,7 +72,6 @@ return `ReaderErrorCode.unsupportedFixedLayout`. MOBI/AZW3, TXT, comic
 archives, search, bookmarks, highlights, and notes are planned extensions.
 
 - [Architecture](docs/architecture.md)
-- [Core release plan](docs/reader-plan.md)
 - [Client integration](docs/integration.md)
 - [Supported formats](docs/supported-formats.md)
 
