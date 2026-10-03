@@ -72,3 +72,41 @@ Material defaults are constructed from the reading palette rather than copying
 the host's resolved colors. This includes the legacy canvas color used by dropdown
 popup routes, field labels/borders and disabled controls. Host typography, control
 geometry, theme extensions and motion policy remain available to the reader.
+
+The presentation layer keeps session, keyboard and viewport coordination in
+`papyrus_reader.dart`. Toolbar/progress controls, contents, settings and the panel
+header live in separate presentation modules. These modules are implementation
+details and are not exported by the package entry point. Public builder contexts
+and custom-engine integration remain in the shell's existing public API.
+
+## Library decisions
+
+- Retain `epub_pro` 5.6 for EPUB container, metadata and navigation parsing behind
+  a worker boundary. Do not treat its TOC as the OPF spine.
+- Retain `pdfrx` 2.x for all six PDF targets. Its native/WASM viewer already owns
+  rendering and zoom; a facade keeps engine tests independent of PDFium.
+- Retain `flutter_html` for the injectable HTML scrolling renderer. Native rich
+  pagination must preserve semantic runs and images instead of extracting only
+  plain text. Reader preferences override publisher colors and text sizing.
+- Use Dart/Flutter SDK concurrency plus `web` for a packaged browser worker.
+  Flutter `compute` alone is insufficient: it uses the UI event loop on web.
+- Avoid adding platform WebViews for this release: desktop/Linux and web would
+  need different engines and bridges. Re-evaluate a browser EPUB renderer for
+  full publisher CSS, fixed-layout EPUB and standardized CFI interoperability.
+
+Sources: [Flutter isolate behavior](https://docs.flutter.dev/perf/isolates),
+[epub_pro API](https://pub.dev/documentation/epub_pro/5.6.0/epub_pro/EpubReader-class.html),
+[pdfrx](https://github.com/espresso3389/pdfrx/tree/master/packages/pdfrx).
+
+## UI and integration
+
+Keep a quiet reading canvas, readable line length, 48px controls, clear contents
+and appearance panels, and a progress scrubber. Typography and navigation must
+behave the same on phone and desktop. Respect reduced motion and e-ink hosts.
+Capability flags expose only controls implemented by the active engine.
+
+Existing `ReaderDocument`, controller ownership and observer callbacks remain
+compatible. EPUB locators gain optional content offsets; legacy CFI strings are
+compatibility data, not a claim of full EPUB CFI conformance. The Papyrus adapter
+already stores complete locator JSON, so optional locator fields need no database
+schema migration. Host preference and progress writes remain host-owned.

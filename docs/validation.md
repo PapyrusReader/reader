@@ -63,5 +63,5 @@ remain necessary before declaring a production release. No cold-open or frame
 latency guarantee is claimed from the synthetic fixtures.
 
 Publisher CSS/fonts, RTL progression, complex tables/math and fixed-layout EPUB
-are outside this core implementation; see `supported-formats.md` and the release
-plan before evaluating books that rely on those features.
+are outside this core implementation; see `supported-formats.md` and the architecture
+reference before evaluating books that rely on those features.

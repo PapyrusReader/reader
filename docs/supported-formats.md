@@ -13,5 +13,5 @@ and illustrations are preserved. Complex tables become readable rows; publisher
 stylesheets, embedded fonts, advanced SVG/math, RTL book progression and footnote
 interaction are not complete. Font choices use installed platform families.
 
-Search, bookmarks, highlights and notes are planned in `reader-plan.md`. Do not
+Search, bookmarks, highlights and notes are future extensions. Do not
 advertise them until their engines, UI and host persistence contracts exist.
