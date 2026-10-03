@@ -5,10 +5,22 @@ import 'dart:typed_data';
 void main() {
   final assets = Directory('example/assets')..createSync(recursive: true);
   File('${assets.path}/the_garden_letter.epub').writeAsBytesSync(_epub());
+  File(
+    '${assets.path}/reading_lab.epub',
+  ).writeAsBytesSync(_epub(longSample: true));
   File('${assets.path}/a_tiny_pdf.pdf').writeAsBytesSync(_pdf());
 }
 
-Uint8List _epub() {
+Uint8List _epub({bool longSample = false}) {
+  final longContent = longSample
+      ? List.generate(
+          75,
+          (i) =>
+              '<p>Passage ${i + 1}. Reading should feel calm on a small phone and a wide desktop. '
+              'A page turn keeps its place, while <em>emphasis</em> and <strong>meaning</strong> '
+              'remain part of the story. Resize the window or change the typeface to try reflow.</p>',
+        ).join()
+      : '';
   return _zip({
     'mimetype': utf8.encode('application/epub+zip'),
     'META-INF/container.xml': utf8.encode('''
@@ -60,6 +72,7 @@ Uint8List _epub() {
   <p>Dear friend, the first green shoots have reached the old garden gate.</p>
   <p>I left a chair beneath the pear tree, where the afternoon gathers slowly.</p>
   <p>This little demo text is dedicated to the public domain.</p>
+  $longContent
  </body>
 </html>'''),
     'OEBPS/text/two.xhtml': utf8.encode('''
@@ -69,27 +82,34 @@ Uint8List _epub() {
   <h1>After the Rain</h1>
   <p>The path shone silver this morning, and every leaf held a small sky.</p>
   <p>Come when you can. The book and the quiet corner will be waiting.</p>
+  $longContent
  </body>
 </html>'''),
   });
 }
 
 Uint8List _pdf() {
+  const pageCount = 3;
+  const fontId = 3 + pageCount * 2;
   final objects = <String>[
     '<< /Type /Catalog /Pages 2 0 R >>',
-    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
-    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 420] '
-        '/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
-    '',
+    '<< /Type /Pages /Kids [${List.generate(pageCount, (i) => '${3 + i * 2} 0 R').join(' ')}] /Count $pageCount >>',
+    for (var i = 0; i < pageCount; i++) ...[
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 420] '
+          '/Resources << /Font << /F1 $fontId 0 R >> >> /Contents ${4 + i * 2} 0 R >>',
+      '',
+    ],
     '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
   ];
-  const stream =
-      'BT\n/F1 22 Tf\n40 340 Td\n(A Tiny PDF) Tj\n'
-      '/F1 12 Tf\n0 -34 Td\n(A valid one-page Papyrus demo.) Tj\nET\n';
-  objects[3] =
-      '<< /Length ${ascii.encode(stream).length} >>\n'
-      'stream\n$stream'
-      'endstream';
+  for (var i = 0; i < pageCount; i++) {
+    final stream =
+        'BT\n/F1 22 Tf\n40 340 Td\n(A Tiny PDF) Tj\n'
+        '/F1 12 Tf\n0 -34 Td\n(Page ${i + 1} of $pageCount.) Tj\nET\n';
+    objects[3 + i * 2] =
+        '<< /Length ${ascii.encode(stream).length} >>\n'
+        'stream\n$stream'
+        'endstream';
+  }
 
   final output = StringBuffer('%PDF-1.4\n');
   final offsets = <int>[0];

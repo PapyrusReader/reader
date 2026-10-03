@@ -6,6 +6,7 @@ import 'package:html/parser.dart' as html_parser;
 import 'package:papyrus_reader/papyrus_reader.dart';
 
 import '../support/synthetic_epub.dart';
+import '../support/in_process_epub_worker.dart';
 
 void main() {
   ReaderDocument document(Uint8List bytes, {String id = 'epub'}) {
@@ -17,6 +18,39 @@ void main() {
   }
 
   group('EpubReaderEngine', () {
+    test('spine order is independent of a reordered TOC', () async {
+      final engine = testEpubEngine();
+      await engine.load(
+        document(syntheticEpub(reversedToc: true)),
+        preferences: const ReaderPreferences(),
+      );
+      expect(engine.currentChapterHtml, contains('Chapter One'));
+      expect(
+        (engine.snapshot.toc.first.locator as EpubReaderLocator).spineIndex,
+        2,
+      );
+      await engine.goNext();
+      expect(engine.currentChapterHtml, contains('Chapter Two'));
+      await engine.goTo(engine.snapshot.toc.first.locator);
+      expect(engine.currentChapterHtml, contains('Chapter Three'));
+    });
+
+    test('TOC fragment anchors restore a position inside the chapter', () async {
+      final engine = testEpubEngine();
+      await engine.load(
+        document(
+          syntheticEpub(
+            secondChapterBody:
+                '<p>Text before the target.</p><h2 id="part-a">Part A</h2><p>After the target.</p>',
+          ),
+        ),
+        preferences: const ReaderPreferences(),
+      );
+      await engine.goTo(engine.snapshot.toc.first.children.single.locator);
+      final locator = await engine.currentLocator() as EpubReaderLocator;
+      expect(locator.spineIndex, 1);
+      expect(locator.textOffset, greaterThan(0));
+    });
     test(
       'lazily loads a valid EPUB and builds nested table of contents',
       () async {
@@ -29,7 +63,7 @@ void main() {
             return syntheticEpub();
           },
         );
-        final engine = EpubReaderEngine();
+        final engine = testEpubEngine();
 
         expect(loads, 0);
         await engine.load(book, preferences: const ReaderPreferences());
@@ -46,7 +80,7 @@ void main() {
     );
 
     test('restores, navigates, and publishes CFI locators', () async {
-      final engine = EpubReaderEngine();
+      final engine = testEpubEngine();
       final book = document(syntheticEpub());
       final restored = EpubReaderLocator(
         cfi: 'epubcfi(/6/4!/4/1:0)',
@@ -107,7 +141,7 @@ void main() {
     });
 
     test('maps continuous progress across spine and local progress', () async {
-      final engine = EpubReaderEngine();
+      final engine = testEpubEngine();
       await engine.load(
         document(syntheticEpub()),
         preferences: const ReaderPreferences(),
@@ -130,7 +164,7 @@ void main() {
     });
 
     test('rejects invalid continuous progress', () async {
-      final engine = EpubReaderEngine();
+      final engine = testEpubEngine();
       await engine.load(
         document(syntheticEpub()),
         preferences: const ReaderPreferences(),
@@ -145,7 +179,7 @@ void main() {
     });
 
     test('rejects an out-of-bounds restored locator', () async {
-      final engine = EpubReaderEngine();
+      final engine = testEpubEngine();
 
       await expectLater(
         engine.load(
@@ -169,7 +203,7 @@ void main() {
     });
 
     test('maps malformed and fixed-layout books to stable errors', () async {
-      final malformed = EpubReaderEngine();
+      final malformed = testEpubEngine();
       await expectLater(
         malformed.load(
           document(Uint8List.fromList([1, 2, 3])),
@@ -184,7 +218,7 @@ void main() {
         ),
       );
 
-      final fixed = EpubReaderEngine();
+      final fixed = testEpubEngine();
       await expectLater(
         fixed.load(
           document(syntheticEpub(fixedLayout: true)),
@@ -201,7 +235,7 @@ void main() {
     });
 
     test('applies preference changes to the ready snapshot', () async {
-      final engine = EpubReaderEngine();
+      final engine = testEpubEngine();
       await engine.load(
         document(syntheticEpub()),
         preferences: const ReaderPreferences(),
@@ -220,7 +254,7 @@ void main() {
       'clears pagination cache when documents and chapters change',
       () async {
         final paginator = TrackingEpubPaginator();
-        final engine = EpubReaderEngine(paginator: paginator);
+        final engine = testEpubEngine(paginator: paginator);
 
         await engine.load(
           document(syntheticEpub(), id: 'first'),
@@ -240,7 +274,7 @@ void main() {
       'failed chapter navigation preserves the ready chapter state',
       () async {
         final paginator = TrackingEpubPaginator();
-        final engine = EpubReaderEngine(paginator: paginator);
+        final engine = testEpubEngine(paginator: paginator);
         await engine.load(
           document(syntheticEpub(corruptSecondChapter: true)),
           preferences: const ReaderPreferences(),
@@ -261,7 +295,7 @@ void main() {
 
     test('failed initial chapter load leaves the engine idle', () async {
       final paginator = TrackingEpubPaginator();
-      final engine = EpubReaderEngine(paginator: paginator);
+      final engine = testEpubEngine(paginator: paginator);
       final restored = EpubReaderLocator(
         cfi: 'epubcfi(/6/4!/4/1:0)',
         spineIndex: 1,
@@ -292,7 +326,7 @@ void main() {
       'failed replacement load preserves the ready document state',
       () async {
         final paginator = TrackingEpubPaginator();
-        final engine = EpubReaderEngine(paginator: paginator);
+        final engine = testEpubEngine(paginator: paginator);
         await engine.load(
           document(syntheticEpub(), id: 'ready'),
           preferences: const ReaderPreferences(),
@@ -330,7 +364,7 @@ void main() {
     test(
       'sanitizes active content and resource-loading URLs with a DOM',
       () async {
-        final engine = EpubReaderEngine();
+        final engine = testEpubEngine();
         await engine.load(
           document(syntheticEpub(malicious: true)),
           preferences: const ReaderPreferences(),
@@ -396,7 +430,7 @@ void main() {
   testWidgets(
     'scroll viewport renders sanitized EPUB content and local image',
     (tester) async {
-      final engine = EpubReaderEngine();
+      final engine = testEpubEngine();
       await engine.load(
         document(syntheticEpub(malicious: true)),
         preferences: const ReaderPreferences(
@@ -410,7 +444,7 @@ void main() {
           child: Builder(builder: engine.buildViewport),
         ),
       );
-      await tester.pump();
+      await tester.pumpAndSettle();
 
       expect(find.text('Chapter One'), findsOneWidget);
       expect(find.byType(Image), findsOneWidget);
@@ -422,7 +456,7 @@ void main() {
   testWidgets('paginated viewport splits content into bounded pages', (
     tester,
   ) async {
-    final engine = EpubReaderEngine();
+    final engine = testEpubEngine();
     await engine.load(
       document(syntheticEpub(longChapter: true)),
       preferences: const ReaderPreferences(
@@ -450,7 +484,7 @@ void main() {
   testWidgets('paginated text blocks preserve sanitized semantic content', (
     tester,
   ) async {
-    final engine = EpubReaderEngine();
+    final engine = testEpubEngine();
     await engine.load(
       document(
         syntheticEpub(
@@ -486,7 +520,7 @@ void main() {
 
     final blocks = tester
         .widgetList<Text>(find.byType(Text))
-        .map((text) => text.data)
+        .map((text) => text.data ?? text.textSpan?.toPlainText())
         .whereType<String>()
         .toList();
 
@@ -496,17 +530,16 @@ void main() {
       'Before nested',
       'Inner block',
       'After',
-      'List one',
-      'List two',
+      '• List one',
+      '• List two',
       'Quoted words',
       'line one\n  line two',
-      'Heading',
-      'Cell value',
+      'Heading | Cell value',
     ]);
   });
 
   testWidgets('paginated viewport publishes page progression', (tester) async {
-    final engine = EpubReaderEngine();
+    final engine = testEpubEngine();
     await engine.load(
       document(syntheticEpub(longChapter: true)),
       preferences: const ReaderPreferences(
@@ -537,7 +570,7 @@ void main() {
   testWidgets(
     'paginated viewport restores and updates the visual page from locator progress',
     (tester) async {
-      final engine = EpubReaderEngine();
+      final engine = testEpubEngine();
       await engine.load(
         document(syntheticEpub(longChapter: true)),
         initialLocator: EpubReaderLocator(
@@ -595,7 +628,7 @@ void main() {
   testWidgets(
     'scroll viewport restores visual offset and publishes scroll progression',
     (tester) async {
-      final engine = EpubReaderEngine();
+      final engine = testEpubEngine();
       await engine.load(
         document(syntheticEpub(longChapter: true)),
         initialLocator: EpubReaderLocator(
@@ -621,16 +654,11 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      final scrollView = tester.widget<SingleChildScrollView>(
-        find.byType(SingleChildScrollView),
-      );
+      final scrollView = tester.widget<ListView>(find.byType(ListView));
       final position = scrollView.controller!.position;
       expect(position.pixels, closeTo(position.maxScrollExtent * 0.5, 1));
 
-      await tester.drag(
-        find.byType(SingleChildScrollView),
-        const Offset(0, -300),
-      );
+      await tester.drag(find.byType(ListView), const Offset(0, -300));
       await tester.pumpAndSettle();
 
       final locator = await engine.currentLocator() as EpubReaderLocator;
@@ -643,7 +671,7 @@ void main() {
   testWidgets('scroll viewport publishes the final ballistic progression', (
     tester,
   ) async {
-    final engine = EpubReaderEngine();
+    final engine = testEpubEngine();
     await engine.load(
       document(syntheticEpub(longChapter: true)),
       preferences: const ReaderPreferences(layoutMode: ReaderLayoutMode.scroll),
@@ -661,16 +689,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final scrollView = tester.widget<SingleChildScrollView>(
-      find.byType(SingleChildScrollView),
-    );
+    final scrollView = tester.widget<ListView>(find.byType(ListView));
     final position = scrollView.controller!.position;
 
-    await tester.fling(
-      find.byType(SingleChildScrollView),
-      const Offset(0, -300),
-      1800,
-    );
+    await tester.fling(find.byType(ListView), const Offset(0, -300), 1800);
     await tester.pumpAndSettle();
 
     final locator = await engine.currentLocator() as EpubReaderLocator;
@@ -682,7 +704,7 @@ void main() {
   testWidgets(
     'total progression stays continuous through the final spine items',
     (tester) async {
-      final engine = EpubReaderEngine();
+      final engine = testEpubEngine();
       await engine.load(
         document(syntheticEpub(longChapter: true)),
         preferences: const ReaderPreferences(
@@ -704,10 +726,7 @@ void main() {
 
       await tester.pumpWidget(viewport());
       await tester.pumpAndSettle();
-      await tester.drag(
-        find.byType(SingleChildScrollView),
-        const Offset(0, -100000),
-      );
+      await tester.drag(find.byType(ListView), const Offset(0, -100000));
       await tester.pumpAndSettle();
 
       var locator = await engine.currentLocator() as EpubReaderLocator;
@@ -723,10 +742,7 @@ void main() {
 
       await tester.pumpWidget(viewport());
       await tester.pumpAndSettle();
-      await tester.drag(
-        find.byType(SingleChildScrollView),
-        const Offset(0, -100000),
-      );
+      await tester.drag(find.byType(ListView), const Offset(0, -100000));
       await tester.pumpAndSettle();
 
       locator = await engine.currentLocator() as EpubReaderLocator;

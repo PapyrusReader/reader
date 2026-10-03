@@ -2,13 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:papyrus_reader/papyrus_reader.dart';
 import 'package:papyrus_reader_example/main.dart';
+import 'package:papyrus_reader/src/engine/epub/worker/epub_processor.dart';
+import 'package:papyrus_reader/src/engine/epub/worker/epub_worker.dart';
 
 void main() {
   testWidgets('chooses a document, changes theme, and reopens the reader', (
     tester,
   ) async {
     final memory = DemoReaderMemory();
-    await tester.pumpWidget(PapyrusReaderDemoApp(memory: memory));
+    await tester.pumpWidget(
+      PapyrusReaderDemoApp(memory: memory, registry: testRegistry()),
+    );
 
     expect(find.text('Papyrus Reader'), findsOneWidget);
     expect(find.text('A small library, thoughtfully read.'), findsOneWidget);
@@ -68,7 +72,7 @@ void main() {
   });
 
   testWidgets('opens the bundled PDF reader', (tester) async {
-    await tester.pumpWidget(const PapyrusReaderDemoApp());
+    await tester.pumpWidget(PapyrusReaderDemoApp(registry: testRegistry()));
 
     final readPdf = find.widgetWithText(FilledButton, 'Read PDF');
     await tester.scrollUntilVisible(readPdf, 300);
@@ -78,4 +82,24 @@ void main() {
 
     expect(find.byType(PapyrusReader), findsOneWidget);
   });
+}
+
+ReaderEngineRegistry testRegistry() => ReaderEngineRegistry([
+  ReaderEngineRegistration(
+    formats: const {ReaderFormat.epub},
+    factory: () => EpubReaderEngine(workerFactory: () async => _TestWorker()),
+  ),
+  ReaderEngineRegistration(
+    formats: const {ReaderFormat.pdf},
+    factory: PdfReaderEngine.new,
+  ),
+]);
+
+final class _TestWorker implements EpubWorker {
+  final EpubProcessor processor = EpubProcessor();
+  @override
+  Future<Map<String, Object?>> request(String command, Object? argument) =>
+      processor.dispatch(command, argument);
+  @override
+  void dispose() {}
 }

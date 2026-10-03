@@ -1,0 +1,47 @@
+# Client integration
+
+Pass a stable `ReaderDocument` for the lifetime of a book session. Constructing a
+new instance on every host rebuild requests a fresh load. File loading is lazy;
+the callback may read an offline cache or retrieve missing media. Supply `onBack`
+so loading and error screens can exit. Keep host download screens escapable too.
+
+The widget owns its controller unless one is supplied. An external controller is
+host-owned and must be disposed by the host. Engine factories must return fresh
+instances. Observers should enqueue durable host writes, with a flush on close,
+background and profile changes. The package never writes account-scoped data.
+
+Serialize `ReaderLocator.toJson()` in full. Existing version-1 EPUB and PDF
+locators remain readable. New EPUB positions may include `textOffset` and `anchor`;
+these fields improve reflow and TOC restoration without a database migration.
+Do not interpret legacy EPUB CFI strings as standardized CFI positions. A custom
+HTML scrolling renderer continues to use approximate progression restoration.
+
+PDF stores `pageIndex`, `pageOffset` and `totalProgression`. A custom facade can
+report intra-page offsets through `PdfViewportConfiguration.onPositionChanged`.
+Implement `DisposablePdfFacade` when a custom facade owns document resources.
+
+## Local Papyrus verification
+
+`client/app/pubspec.yaml` pins a separately released reader revision. Temporarily
+create the ignored `client/app/pubspec_overrides.yaml`:
+
+```yaml
+dependency_overrides:
+  papyrus_reader:
+    path: ../../reader
+```
+
+Run dependency resolution, reader-related client tests, analyze and a web build
+against this path. Remove the override afterward and restore the released lockfile
+and dependency resolution. Publishing the integration requires committing reader
+changes, updating the client's Git revision/lockfile and recording the new reader
+submodule revision in the workspace. A sibling edit alone does not update client.
+
+## Browser hosts
+
+The packaged worker is included by Flutter's asset manifest. Applications need no
+worker-generation build step. Serving under a URL subpath works because the host
+loads the worker through `rootBundle` and creates a local Blob URL. A restrictive
+Content Security Policy must allow `worker-src blob:`; do not fall back silently
+to main-thread parsing if worker initialization fails. Offline deployment must
+cache the packaged worker alongside other Flutter assets.

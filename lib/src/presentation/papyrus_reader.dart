@@ -56,6 +56,8 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
   late ReaderController _controller;
   late bool _ownsController;
   ReaderSnapshot? _observedSnapshot;
+  Widget? _cachedViewport;
+  ReaderPreferences? _viewportPreferences;
   _ReaderPanel _panel = _ReaderPanel.none;
   double? _dragProgress;
   int _loadGeneration = 0;
@@ -77,6 +79,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
     debugLabel: 'reader wide panel',
   );
   FocusNode? _widePanelOpener;
+  final FocusNode _readerFocusNode = FocusNode(debugLabel: 'reader navigation');
 
   bool get _isCommandBusy => _pendingCommands > 0;
 
@@ -103,6 +106,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
         oldWidget.controller != widget.controller ||
         oldWidget.registry != widget.registry;
     final documentChanged = oldWidget.document != widget.document;
+    if (documentChanged) _cachedViewport = null;
     if (controllerChanged || documentChanged) {
       _dismissCompactPanel();
       _invalidateCommands(notify: false);
@@ -135,6 +139,8 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
 
   void _detachController() {
     _loadGeneration++;
+    _cachedViewport = null;
+    _viewportPreferences = null;
     _controller.removeListener(_controllerChanged);
     if (_ownsController) {
       _controller.dispose();
@@ -247,25 +253,74 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
     _tocButtonFocusNode.dispose();
     _settingsButtonFocusNode.dispose();
     _widePanelFocusNode.dispose();
+    _readerFocusNode.dispose();
     _commandRevision.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = widget.theme ?? ReaderThemeData.fromTheme(Theme.of(context));
     final snapshot = _controller.snapshot;
-
-    return Material(
-      color: theme.surfaceColor,
-      child: SafeArea(
-        child: switch (snapshot.status) {
-          ReaderStatus.idle => _buildEmpty(context, snapshot, theme),
-          ReaderStatus.loading => _buildLoading(context, snapshot, theme),
-          ReaderStatus.error => _buildError(context, snapshot, theme),
-          ReaderStatus.ready => _buildReady(context, snapshot, theme),
-        },
+    final ambient = Theme.of(context);
+    final colors = snapshot.status == ReaderStatus.ready
+        ? ColorScheme.fromSeed(
+            seedColor: ambient.colorScheme.primary,
+            brightness: snapshot.preferences.brightness,
+          )
+        : ambient.colorScheme;
+    final readerTheme = ambient.copyWith(
+      colorScheme: colors,
+      brightness: colors.brightness,
+      textTheme: ambient.textTheme.apply(
+        bodyColor: colors.onSurface,
+        displayColor: colors.onSurface,
       ),
+      primaryTextTheme: ambient.primaryTextTheme.apply(
+        bodyColor: colors.onPrimary,
+        displayColor: colors.onPrimary,
+      ),
+      iconTheme: ambient.iconTheme.copyWith(color: colors.onSurface),
+    );
+    final theme = widget.theme ?? ReaderThemeData.fromTheme(readerTheme);
+    return Theme(
+      data: readerTheme,
+      child: Builder(
+        builder: (context) => Material(
+          color: theme.surfaceColor,
+          child: SafeArea(
+            child: switch (snapshot.status) {
+              ReaderStatus.idle => _buildEmpty(context, snapshot, theme),
+              ReaderStatus.loading => _stateChrome(
+                _buildLoading(context, snapshot, theme),
+                theme,
+              ),
+              ReaderStatus.error => _stateChrome(
+                _buildError(context, snapshot, theme),
+                theme,
+              ),
+              ReaderStatus.ready => _buildReady(context, snapshot, theme),
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _stateChrome(Widget child, ReaderThemeData theme) {
+    return Column(
+      children: [
+        if (widget.onBack != null)
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: _ReaderIconButton(
+              icon: Icons.arrow_back_rounded,
+              tooltip: 'Back',
+              onPressed: widget.onBack,
+              theme: theme,
+            ),
+          ),
+        Expanded(child: child),
+      ],
     );
   }
 
@@ -411,10 +466,14 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
             const SingleActivator(LogicalKeyboardKey.pageUp): _goPrevious,
             const SingleActivator(LogicalKeyboardKey.arrowRight): _goNext,
             const SingleActivator(LogicalKeyboardKey.pageDown): _goNext,
+            const SingleActivator(LogicalKeyboardKey.space): _goNext,
+            const SingleActivator(LogicalKeyboardKey.space, shift: true):
+                _goPrevious,
           },
           child: FocusTraversalGroup(
             policy: OrderedTraversalPolicy(),
             child: Focus(
+              focusNode: _readerFocusNode,
               autofocus: true,
               child: Column(
                 children: [
@@ -443,11 +502,15 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
                           isWide: isWide,
                         ),
                   ),
-                  if (_isCommandBusy)
-                    const LinearProgressIndicator(
-                      key: ValueKey('reader-command-progress'),
-                      minHeight: 2,
-                    ),
+                  SizedBox(
+                    height: 2,
+                    child: _isCommandBusy
+                        ? const LinearProgressIndicator(
+                            key: ValueKey('reader-command-progress'),
+                            minHeight: 2,
+                          )
+                        : null,
+                  ),
                   if (_commandError case final error?)
                     _ReaderCommandError(
                       message: error,
@@ -463,7 +526,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
                             child: _buildViewport(context, snapshot),
                           ),
                         ),
-                        if (isWide) ...[
+                        if (isWide && _panel != _ReaderPanel.none) ...[
                           VerticalDivider(width: 1, color: theme.dividerColor),
                           FocusTraversalOrder(
                             order: const NumericFocusOrder(2),
@@ -488,6 +551,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
                     order: const NumericFocusOrder(4),
                     child: _ReaderProgressControls(
                       progress: _dragProgress ?? _progressOf(snapshot.locator),
+                      locationLabel: snapshot.locationLabel,
                       onProgressChanged: (value) {
                         setState(() => _dragProgress = value);
                       },
@@ -508,7 +572,12 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
   }
 
   Widget _buildViewport(BuildContext context, ReaderSnapshot snapshot) {
-    final viewport = _controller.buildViewport(context);
+    if (_cachedViewport == null ||
+        _viewportPreferences != snapshot.preferences) {
+      _cachedViewport = _controller.buildViewport(context);
+      _viewportPreferences = snapshot.preferences;
+    }
+    final viewport = _cachedViewport!;
     final builder = widget.builders.viewport;
 
     return builder?.call(
@@ -602,19 +671,80 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
       modalBarrierColor: Theme.of(context).bottomSheetTheme.modalBarrierColor,
       useSafeArea: true,
       isScrollControlled: true,
-      showDragHandle: true,
+      backgroundColor: Colors.transparent,
+      showDragHandle: false,
       constraints: BoxConstraints(
         maxWidth: theme.compactBreakpoint,
-        maxHeight: MediaQuery.sizeOf(context).height * 0.82,
+        maxHeight: math.max(
+          160,
+          (MediaQuery.sizeOf(context).height -
+                  MediaQuery.viewInsetsOf(context).bottom) *
+              0.88,
+        ),
       ),
       builder: (sheetContext) {
         Widget buildPanel() {
-          return _panelWidget(
-            sheetContext,
-            _controller.snapshot,
-            panel,
-            theme,
-            () => Navigator.of(sheetContext).pop(),
+          // Captured route themes are a snapshot. Appearance can change while
+          // this sheet is open, so use the current reader theme on every update.
+          final preferences = _controller.preferences;
+          final colors = ColorScheme.fromSeed(
+            seedColor: Theme.of(this.context).colorScheme.primary,
+            brightness: preferences.brightness,
+          );
+          final base = Theme.of(this.context);
+          final currentTheme = base.copyWith(
+            colorScheme: colors,
+            brightness: colors.brightness,
+            textTheme: base.textTheme.apply(
+              bodyColor: colors.onSurface,
+              displayColor: colors.onSurface,
+            ),
+            primaryTextTheme: base.primaryTextTheme.apply(
+              bodyColor: colors.onPrimary,
+              displayColor: colors.onPrimary,
+            ),
+            iconTheme: base.iconTheme.copyWith(color: colors.onSurface),
+          );
+          final panelTheme =
+              widget.theme ?? ReaderThemeData.fromTheme(currentTheme);
+          return Theme(
+            data: currentTheme,
+            child: Builder(
+              builder: (context) => ClipRRect(
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(28),
+                ),
+                child: ColoredBox(
+                  color: panelTheme.panelColor,
+                  child: Column(
+                    children: [
+                      SizedBox(
+                        height: 32,
+                        child: Center(
+                          child: Container(
+                            width: 32,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: colors.onSurfaceVariant,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: _panelWidget(
+                          context,
+                          _controller.snapshot,
+                          panel,
+                          panelTheme,
+                          () => Navigator.of(sheetContext).pop(),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           );
         }
 
@@ -736,6 +866,10 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
 
     final generation = _commandGeneration;
     final controller = _controller;
+    final restoreReadingFocus =
+        _readerFocusNode.hasFocus &&
+        _panel == _ReaderPanel.none &&
+        _compactPanelRoute == null;
     _pendingCommands++;
     _commandError = null;
     _commandRevision.value++;
@@ -769,6 +903,16 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
       _pendingCommands = math.max(0, _pendingCommands - 1);
       _commandRevision.value++;
       setState(() {});
+      if (restoreReadingFocus) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted &&
+              generation == _commandGeneration &&
+              _panel == _ReaderPanel.none &&
+              _compactPanelRoute == null) {
+            _readerFocusNode.requestFocus();
+          }
+        });
+      }
     });
   }
 
@@ -964,6 +1108,7 @@ final class _ReaderProgressControls extends StatelessWidget {
     required this.onNext,
     required this.enabled,
     required this.theme,
+    this.locationLabel,
   });
 
   final double progress;
@@ -973,6 +1118,7 @@ final class _ReaderProgressControls extends StatelessWidget {
   final VoidCallback onNext;
   final bool enabled;
   final ReaderThemeData theme;
+  final String? locationLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -987,47 +1133,61 @@ final class _ReaderProgressControls extends StatelessWidget {
           style: TextStyle(color: theme.onChromeColor),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            child: Row(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                _ReaderIconButton(
-                  icon: Icons.chevron_left_rounded,
-                  tooltip: 'Previous',
-                  onPressed: enabled ? onPrevious : null,
-                  theme: theme,
-                ),
-                Expanded(
-                  child: Semantics(
-                    label: 'Reading progress',
-                    value: '$percent percent',
-                    slider: true,
-                    child: SliderTheme(
-                      data: SliderTheme.of(context).copyWith(
-                        activeTrackColor: theme.progressColor,
-                        thumbColor: theme.handleColor,
-                      ),
-                      child: Slider(
-                        value: normalized,
-                        onChanged: enabled ? onProgressChanged : null,
-                        onChangeEnd: enabled ? onProgressChangeEnd : null,
-                      ),
+                if (locationLabel != null)
+                  Text(
+                    locationLabel!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: theme.onChromeColor,
                     ),
                   ),
-                ),
-                SizedBox(
-                  width: 64,
-                  child: Text(
-                    '$percent%',
-                    key: const ValueKey('reader-progress-label'),
-                    textAlign: TextAlign.center,
-                    maxLines: 1,
-                    semanticsLabel: '$percent percent read',
-                  ),
-                ),
-                _ReaderIconButton(
-                  icon: Icons.chevron_right_rounded,
-                  tooltip: 'Next',
-                  onPressed: enabled ? onNext : null,
-                  theme: theme,
+                Row(
+                  children: [
+                    _ReaderIconButton(
+                      icon: Icons.chevron_left_rounded,
+                      tooltip: 'Previous',
+                      onPressed: enabled ? onPrevious : null,
+                      theme: theme,
+                    ),
+                    Expanded(
+                      child: Semantics(
+                        label: 'Reading progress',
+                        value: '$percent percent',
+                        slider: true,
+                        child: SliderTheme(
+                          data: SliderTheme.of(context).copyWith(
+                            activeTrackColor: theme.progressColor,
+                            thumbColor: theme.handleColor,
+                          ),
+                          child: Slider(
+                            value: normalized,
+                            onChanged: enabled ? onProgressChanged : null,
+                            onChangeEnd: enabled ? onProgressChangeEnd : null,
+                          ),
+                        ),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 64,
+                      child: Text(
+                        '$percent%',
+                        key: const ValueKey('reader-progress-label'),
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        semanticsLabel: '$percent percent read',
+                      ),
+                    ),
+                    _ReaderIconButton(
+                      icon: Icons.chevron_right_rounded,
+                      tooltip: 'Next',
+                      onPressed: enabled ? onNext : null,
+                      theme: theme,
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -1185,6 +1345,43 @@ final class _ReaderSettingsPanel extends StatelessWidget {
             padding: EdgeInsets.all(theme.panelPadding),
             children: [
               if (capabilities.supportsTextCustomization) ...[
+                DropdownButtonFormField<String>(
+                  key: ValueKey(('reader-font', preferences.fontFamily)),
+                  initialValue:
+                      const <String?>[
+                        null,
+                        'serif',
+                        'sans-serif',
+                        'monospace',
+                      ].contains(preferences.fontFamily)
+                      ? preferences.fontFamily ?? 'system'
+                      : 'system',
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Typeface',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'system', child: Text('System')),
+                    DropdownMenuItem(value: 'serif', child: Text('Serif')),
+                    DropdownMenuItem(
+                      value: 'sans-serif',
+                      child: Text('Sans serif'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'monospace',
+                      child: Text('Monospace'),
+                    ),
+                  ],
+                  onChanged: enabled
+                      ? (value) => _update(
+                          preferences.copyWith(
+                            fontFamily: value == 'system' ? null : value,
+                          ),
+                        )
+                      : null,
+                ),
+                const SizedBox(height: 20),
                 _SettingSlider(
                   title: 'Font size',
                   value: preferences.fontSize.clamp(8, 72),
@@ -1230,6 +1427,7 @@ final class _ReaderSettingsPanel extends StatelessWidget {
               if (capabilities.supportsPagination ||
                   capabilities.supportsScrolling) ...[
                 DropdownButtonFormField<ReaderLayoutMode>(
+                  key: ValueKey(('reader-mode', preferences.layoutMode)),
                   initialValue: preferences.layoutMode,
                   isExpanded: true,
                   decoration: const InputDecoration(
@@ -1260,6 +1458,7 @@ final class _ReaderSettingsPanel extends StatelessWidget {
               if (capabilities.supportsColumnMode) ...[
                 const SizedBox(height: 12),
                 DropdownButtonFormField<ReaderColumnMode>(
+                  key: ValueKey(('reader-columns', preferences.columnMode)),
                   initialValue: preferences.columnMode,
                   isExpanded: true,
                   decoration: const InputDecoration(
@@ -1472,8 +1671,19 @@ final class _AppearancePreset extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return ChoiceChip(
       label: Text(label),
+      labelStyle: TextStyle(
+        color: selected ? colors.onSecondaryContainer : colors.onSurface,
+      ),
+      color: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.selected)
+            ? colors.secondaryContainer
+            : colors.surfaceContainerLow,
+      ),
+      checkmarkColor: colors.onSecondaryContainer,
+      side: BorderSide(color: colors.outlineVariant),
       selected: selected,
       avatar: CircleAvatar(backgroundColor: background),
       onSelected: enabled

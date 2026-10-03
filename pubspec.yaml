@@ -9,14 +9,16 @@ environment:
   flutter: ">=3.35.0"
 
 dependencies:
+  characters: ^1.4.1
   epub_pro: ^5.6.0
   flutter:
     sdk: flutter
   flutter_html: ^3.0.0
   # flutter_html 3.0.0 uses the private matches API removed in html 0.15.7.
   html: 0.15.6
-  # 2.4.8 requires the PDF engine fixes for nullable native cache access.
-  pdfrx: ^2.4.8
+  # 2.4.8 requires meta 1.18, conflicting with Flutter 3.41.2's SDK pin.
+  pdfrx: ^2.4.7
+  web: ^1.1.1
 
 dev_dependencies:
   flutter_test:
@@ -28,6 +30,9 @@ dev_dependencies:
 
 # The following section is specific to Flutter packages.
 flutter:
+  assets:
+    - assets/epub_worker.js
+    - assets/epub_worker.NOTICES
 
   # To add assets to your package, add an assets section, like this:
   # assets:

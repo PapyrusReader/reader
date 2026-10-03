@@ -18,6 +18,7 @@ export 'src/engine/epub/epub_reader_engine.dart';
 export 'src/engine/pdf/pdf_facade.dart'
     show
         PdfFacade,
+        DisposablePdfFacade,
         PdfFacadeError,
         PdfFacadeException,
         PdfFacadeFactory,

@@ -27,6 +27,8 @@ final class EpubReaderLocator extends ReaderLocator {
     required int spineIndex,
     required double localProgression,
     required double totalProgression,
+    int? textOffset,
+    String? anchor,
   }) {
     if (cfi.trim().isEmpty) {
       throw ArgumentError.value(cfi, 'cfi', 'must not be empty');
@@ -40,12 +42,21 @@ final class EpubReaderLocator extends ReaderLocator {
     }
     _validateProgressionArgument(localProgression, 'localProgression');
     _validateProgressionArgument(totalProgression, 'totalProgression');
+    if (textOffset != null && textOffset < 0) {
+      throw ArgumentError.value(
+        textOffset,
+        'textOffset',
+        'must be non-negative',
+      );
+    }
 
     return EpubReaderLocator._(
       cfi: cfi,
       spineIndex: spineIndex,
       localProgression: localProgression,
       totalProgression: totalProgression,
+      textOffset: textOffset,
+      anchor: anchor,
     );
   }
 
@@ -54,6 +65,8 @@ final class EpubReaderLocator extends ReaderLocator {
     required this.spineIndex,
     required this.localProgression,
     required this.totalProgression,
+    this.textOffset,
+    this.anchor,
   });
 
   factory EpubReaderLocator._fromJson(Map<String, Object?> json) {
@@ -68,12 +81,24 @@ final class EpubReaderLocator extends ReaderLocator {
         'EPUB locator spineIndex must be a non-negative integer.',
       );
     }
+    final textOffset = json['textOffset'];
+    final anchor = json['anchor'];
+    if (textOffset != null && (textOffset is! int || textOffset < 0)) {
+      throw const FormatException(
+        'EPUB textOffset must be a non-negative integer.',
+      );
+    }
+    if (anchor != null && anchor is! String) {
+      throw const FormatException('EPUB anchor must be a string.');
+    }
 
     return EpubReaderLocator._(
       cfi: cfi,
       spineIndex: spineIndex,
       localProgression: _readProgression(json, 'localProgression'),
       totalProgression: _readProgression(json, 'totalProgression'),
+      textOffset: textOffset as int?,
+      anchor: anchor as String?,
     );
   }
 
@@ -81,6 +106,8 @@ final class EpubReaderLocator extends ReaderLocator {
   final int spineIndex;
   final double localProgression;
   final double totalProgression;
+  final int? textOffset;
+  final String? anchor;
 
   @override
   Map<String, Object?> toJson() {
@@ -97,6 +124,8 @@ final class EpubReaderLocator extends ReaderLocator {
       'spineIndex': spineIndex,
       'localProgression': localProgression,
       'totalProgression': totalProgression,
+      if (textOffset != null) 'textOffset': textOffset,
+      if (anchor != null) 'anchor': anchor,
     };
   }
 
@@ -107,11 +136,19 @@ final class EpubReaderLocator extends ReaderLocator {
           cfi == other.cfi &&
           spineIndex == other.spineIndex &&
           localProgression == other.localProgression &&
+          textOffset == other.textOffset &&
+          anchor == other.anchor &&
           totalProgression == other.totalProgression;
 
   @override
-  int get hashCode =>
-      Object.hash(cfi, spineIndex, localProgression, totalProgression);
+  int get hashCode => Object.hash(
+    cfi,
+    spineIndex,
+    localProgression,
+    totalProgression,
+    textOffset,
+    anchor,
+  );
 }
 
 final class PdfReaderLocator extends ReaderLocator {

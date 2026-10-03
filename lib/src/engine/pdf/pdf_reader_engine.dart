@@ -36,6 +36,8 @@ final class PdfReaderEngine extends ReaderEngine {
   ReaderPreferences _preferences = const ReaderPreferences();
   PdfReaderLocator? _locator;
   List<ReaderTocEntry> _toc = const [];
+  bool _disposed = false;
+  bool _facingPages = false;
 
   @override
   Future<void> load(
@@ -56,12 +58,26 @@ final class PdfReaderEngine extends ReaderEngine {
       );
     }
 
+    PdfFacade? candidate;
     try {
       final bytes = await document.loadBytes();
+      if (_disposed) {
+        throw const ReaderException(
+          ReaderErrorCode.engineUnavailable,
+          'The document was closed.',
+        );
+      }
       final factory =
           _facadeFactory ??
           (bytes) => createPdfrxFacade(bytes, sourceName: document.id);
       final facade = await factory(bytes);
+      candidate = facade;
+      if (_disposed) {
+        throw const ReaderException(
+          ReaderErrorCode.engineUnavailable,
+          'The document was closed.',
+        );
+      }
       if (facade.pageCount <= 0) {
         throw const PdfFacadeException(PdfFacadeError.invalid);
       }
@@ -74,16 +90,34 @@ final class PdfReaderEngine extends ReaderEngine {
         );
       }
 
+      final target = restored ?? _locatorFor(0, pageCount: facade.pageCount);
+      final toc = facade.outline
+          .map((entry) => _tocEntry(entry, facade.pageCount))
+          .toList();
+      await facade.showPage(target.pageIndex, target.pageOffset);
+      if (_disposed) {
+        throw const ReaderException(
+          ReaderErrorCode.engineUnavailable,
+          'The document was closed.',
+        );
+      }
+      final previous = _facade;
       _facade = facade;
+      if (previous != null && !identical(previous, facade)) _release(previous);
       _document = document;
       _preferences = preferences;
-      _locator = restored ?? _locatorFor(0);
-      _toc = facade.outline.map(_tocEntry).toList();
-      await facade.showPage(_locator!.pageIndex, _locator!.pageOffset);
+      _locator = target;
+      _toc = toc;
       _publish();
     } on ReaderException {
+      if (candidate != null && !identical(candidate, _facade)) {
+        _release(candidate);
+      }
       rethrow;
     } on PdfFacadeException catch (error) {
+      if (candidate != null && !identical(candidate, _facade)) {
+        _release(candidate);
+      }
       throw ReaderException(
         error.error == PdfFacadeError.encrypted
             ? ReaderErrorCode.encryptedDocument
@@ -94,6 +128,9 @@ final class PdfReaderEngine extends ReaderEngine {
         cause: error.cause,
       );
     } catch (error) {
+      if (candidate != null && !identical(candidate, _facade)) {
+        _release(candidate);
+      }
       throw ReaderException(
         ReaderErrorCode.invalidDocument,
         'The PDF document is invalid or malformed.',
@@ -102,22 +139,28 @@ final class PdfReaderEngine extends ReaderEngine {
     }
   }
 
-  ReaderTocEntry _tocEntry(PdfFacadeOutlineEntry entry) {
-    final index = entry.pageIndex.clamp(0, _facade!.pageCount - 1);
+  ReaderTocEntry _tocEntry(PdfFacadeOutlineEntry entry, int pageCount) {
+    final index = entry.pageIndex.clamp(0, pageCount - 1);
     return ReaderTocEntry(
       title: entry.title,
-      locator: _locatorFor(index),
-      children: entry.children.map(_tocEntry).toList(),
+      locator: _locatorFor(index, pageCount: pageCount),
+      children: entry.children
+          .map((child) => _tocEntry(child, pageCount))
+          .toList(),
     );
   }
 
-  PdfReaderLocator _locatorFor(int pageIndex, {double pageOffset = 0}) {
-    final last = (_facade?.pageCount ?? 1) - 1;
+  PdfReaderLocator _locatorFor(
+    int pageIndex, {
+    double pageOffset = 0,
+    int? pageCount,
+  }) {
+    final last = (pageCount ?? _facade?.pageCount ?? 1) - 1;
     return PdfReaderLocator(
       pageIndex: pageIndex,
       pageOffset: pageOffset,
       totalProgression: last <= 0
-          ? 0
+          ? pageOffset
           : ((pageIndex + pageOffset) / last).clamp(0, 1),
     );
   }
@@ -133,8 +176,8 @@ final class PdfReaderEngine extends ReaderEngine {
         'The locator is not valid for the current PDF.',
       );
     }
-    _locator = locator;
     await facade.showPage(locator.pageIndex, locator.pageOffset);
+    _locator = locator;
     _publish();
   }
 
@@ -157,6 +200,10 @@ final class PdfReaderEngine extends ReaderEngine {
     }
 
     final lastPageIndex = facade.pageCount - 1;
+    if (lastPageIndex == 0) {
+      await goTo(_locatorFor(0, pageOffset: progress));
+      return;
+    }
     final scaledProgress = progress * lastPageIndex;
     final pageIndex = scaledProgress.floor();
     final pageOffset = pageIndex == lastPageIndex
@@ -181,7 +228,11 @@ final class PdfReaderEngine extends ReaderEngine {
         'No PDF document is loaded.',
       );
     }
-    final page = locator.pageIndex + delta;
+    final step =
+        _preferences.layoutMode == ReaderLayoutMode.paginated && _facingPages
+        ? 2
+        : 1;
+    final page = (locator.pageIndex ~/ step) * step + delta * step;
     if (page < 0 || page >= facade.pageCount) {
       throw const ReaderException(
         ReaderErrorCode.navigationBoundary,
@@ -207,11 +258,21 @@ final class PdfReaderEngine extends ReaderEngine {
   }
 
   void _visiblePageChanged(int pageIndex) {
+    _visiblePositionChanged(pageIndex, 0);
+  }
+
+  void _visiblePositionChanged(int pageIndex, double pageOffset) {
     final facade = _facade;
-    if (facade == null || pageIndex < 0 || pageIndex >= facade.pageCount) {
+    if (_disposed ||
+        facade == null ||
+        pageIndex < 0 ||
+        pageIndex >= facade.pageCount) {
       return;
     }
-    final next = _locatorFor(pageIndex);
+    final next = _locatorFor(
+      pageIndex,
+      pageOffset: (pageOffset.clamp(0, 1) * 10000).round() / 10000,
+    );
     if (next == _locator) {
       return;
     }
@@ -220,12 +281,14 @@ final class PdfReaderEngine extends ReaderEngine {
   }
 
   void _publish() {
+    if (_disposed) return;
     snapshot = ReaderReadySnapshot(
       document: _document!,
       preferences: _preferences,
       capabilities: capabilities,
       locator: _locator,
       toc: _toc,
+      locationLabel: 'Page ${_locator!.pageIndex + 1} of ${_facade!.pageCount}',
     );
     notifyListeners();
   }
@@ -240,21 +303,42 @@ final class PdfReaderEngine extends ReaderEngine {
         'The PDF viewport is not ready.',
       );
     }
-    final facingPages = switch (_preferences.columnMode) {
-      ReaderColumnMode.double => true,
-      ReaderColumnMode.single => false,
-      ReaderColumnMode.automatic =>
-        MediaQuery.maybeSizeOf(context)?.width.compareTo(900) == 1,
-    };
-    return facade.buildViewport(
-      PdfViewportConfiguration(
-        pageIndex: locator.pageIndex,
-        facingPages: facingPages,
-        backgroundColor: _preferences.backgroundColor,
-        brightness: _preferences.brightness,
-        layoutMode: _preferences.layoutMode,
-        onPageChanged: _visiblePageChanged,
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final facingPages = switch (_preferences.columnMode) {
+          ReaderColumnMode.double => constraints.maxWidth >= 600,
+          ReaderColumnMode.single => false,
+          ReaderColumnMode.automatic => constraints.maxWidth >= 1000,
+        };
+        _facingPages = facingPages;
+        return facade.buildViewport(
+          PdfViewportConfiguration(
+            pageIndex: locator.pageIndex,
+            facingPages: facingPages,
+            backgroundColor: _preferences.backgroundColor,
+            brightness: _preferences.brightness,
+            layoutMode: _preferences.layoutMode,
+            onPageChanged: _visiblePageChanged,
+            onPositionChanged: _visiblePositionChanged,
+          ),
+        );
+      },
     );
+  }
+
+  static void _release(PdfFacade facade) {
+    if (facade is DisposablePdfFacade) {
+      (facade as DisposablePdfFacade).dispose();
+    }
+  }
+
+  @override
+  void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+    final facade = _facade;
+    _facade = null;
+    if (facade != null) _release(facade);
+    super.dispose();
   }
 }

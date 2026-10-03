@@ -77,6 +77,7 @@ class FakeReaderEngine extends ReaderEngine {
         throw failure;
       }
 
+      if (isDisposed) return;
       snapshot = ReaderReadySnapshot(
         document: document,
         preferences: preferences,
