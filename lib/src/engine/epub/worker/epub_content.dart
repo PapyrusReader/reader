@@ -14,6 +14,26 @@ Map<String, Object?> collectEpubContent(String html) {
   final runs = <Map<String, Object?>>[];
   String kind = 'p';
   var preformatted = false;
+  final listCounters = <Element, int>{};
+
+  String listMarker(Element item) {
+    Element? owner = item.parent;
+    while (owner != null &&
+        !const {'ol', 'ul', 'menu'}.contains(owner.localName)) {
+      owner = owner.parent;
+    }
+    if (owner == null || owner.localName != 'ol') return '• ';
+    final reversed = owner.attributes.containsKey('reversed');
+    final number =
+        int.tryParse(item.attributes['value']?.trim() ?? '') ??
+        listCounters[owner] ??
+        int.tryParse(owner.attributes['start']?.trim() ?? '') ??
+        (reversed
+            ? owner.children.where((child) => child.localName == 'li').length
+            : 1);
+    listCounters[owner] = number + (reversed ? -1 : 1);
+    return '$number. ';
+  }
 
   void flush() {
     if (runs.isEmpty) return;
@@ -115,7 +135,7 @@ Map<String, Object?> collectEpubContent(String html) {
     if (tag == 's' || tag == 'del') style['strike'] = true;
     if (tag == 'code' || tag == 'pre') style['code'] = true;
     if (tag == 'br') runs.add({'text': '\n', ...style});
-    if (tag == 'li') text('• ', style);
+    if (tag == 'li') text(listMarker(node), style);
     if (tag == 'td' || tag == 'th') {
       if (runs.isNotEmpty) text('  |  ', style);
     }

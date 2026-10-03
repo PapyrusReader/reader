@@ -58,8 +58,6 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
   late ReaderController _controller;
   late bool _ownsController;
   ReaderSnapshot? _observedSnapshot;
-  Widget? _cachedViewport;
-  ReaderPreferences? _viewportPreferences;
   _ReaderPanel _panel = _ReaderPanel.none;
   bool _controlsVisible = true;
   double? _dragProgress;
@@ -113,7 +111,6 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
         oldWidget.controller != widget.controller ||
         oldWidget.registry != widget.registry;
     final documentChanged = oldWidget.document != widget.document;
-    if (documentChanged) _cachedViewport = null;
     if (controllerChanged || documentChanged) {
       _dismissCompactPanel();
       _invalidateCommands(notify: false);
@@ -183,8 +180,6 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
 
   void _detachController() {
     _loadGeneration++;
-    _cachedViewport = null;
-    _viewportPreferences = null;
     _controller.removeListener(_controllerChanged);
     if (_ownsController) {
       _controller.dispose();
@@ -693,12 +688,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
   }
 
   Widget _buildViewport(BuildContext context, ReaderSnapshot snapshot) {
-    if (_cachedViewport == null ||
-        _viewportPreferences != snapshot.preferences) {
-      _cachedViewport = _controller.buildViewport(context);
-      _viewportPreferences = snapshot.preferences;
-    }
-    final viewport = _cachedViewport!;
+    final viewport = _controller.buildViewport(context);
     final builder = widget.builders.viewport;
 
     return builder?.call(
