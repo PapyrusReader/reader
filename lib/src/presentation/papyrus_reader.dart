@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 
 import '../controller/reader_controller.dart';
 import '../domain/reader_document.dart';
+import '../domain/reader_activity.dart';
 import '../domain/reader_exception.dart';
 import '../domain/reader_locator.dart';
 import '../domain/reader_preferences.dart';
@@ -30,6 +31,7 @@ final class PapyrusReader extends StatefulWidget {
     this.theme,
     this.controller,
     this.registry,
+    this.onActivity,
     this.onLocatorChanged,
     this.onPreferencesChanged,
     this.onBack,
@@ -46,6 +48,7 @@ final class PapyrusReader extends StatefulWidget {
   final ReaderThemeData? theme;
   final ReaderController? controller;
   final ReaderEngineRegistry? registry;
+  final ValueChanged<ReaderActivityEvent>? onActivity;
   final ReaderLocatorChanged? onLocatorChanged;
   final ReaderPreferencesChanged? onPreferencesChanged;
   final VoidCallback? onBack;
@@ -268,6 +271,29 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
     }
 
     setState(() {});
+    _reportActivity();
+  }
+
+  void _reportActivity() {
+    if (!mounted) return;
+    final snapshot = _controller.snapshot;
+    _invokeHostCallback(
+      () => widget.onActivity?.call(
+        ReaderActivityEvent(
+          ready: snapshot.contentReady,
+          visible:
+              snapshot.contentReady &&
+              _panel == _ReaderPanel.none &&
+              _compactPanelRoute == null &&
+              (ModalRoute.of(context)?.isCurrent ?? true),
+          cause: _controller.navigationCause,
+          locator: snapshot.locator,
+          coverage: snapshot.coverage,
+          atEnd: snapshot.atEnd,
+        ),
+      ),
+      'onActivity',
+    );
   }
 
   void _invokeHostCallback(VoidCallback callback, String name) {
@@ -302,6 +328,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
 
   @override
   Widget build(BuildContext context) {
+    WidgetsBinding.instance.addPostFrameCallback((_) => _reportActivity());
     final snapshot = _controller.snapshot;
     final ambient = Theme.of(context);
     final readerTheme = snapshot.status == ReaderStatus.ready
@@ -855,6 +882,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
     );
     _compactPanelRoute = route;
     _compactPanelNavigator = navigator;
+    _reportActivity();
     final sheet = navigator.push(route);
     unawaited(
       sheet.then<void>(
@@ -862,12 +890,14 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
           if (identical(_compactPanelRoute, route)) {
             _compactPanelRoute = null;
             _compactPanelNavigator = null;
+            _reportActivity();
           }
         },
         onError: (Object error, StackTrace stackTrace) {
           if (identical(_compactPanelRoute, route)) {
             _compactPanelRoute = null;
             _compactPanelNavigator = null;
+            _reportActivity();
           }
           FlutterError.reportError(
             FlutterErrorDetails(

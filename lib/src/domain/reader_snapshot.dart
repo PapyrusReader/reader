@@ -1,4 +1,5 @@
 import 'reader_capabilities.dart';
+import 'reader_activity.dart';
 import 'reader_document.dart';
 import 'reader_exception.dart';
 import 'reader_locator.dart';
@@ -24,6 +25,9 @@ sealed class ReaderSnapshot {
   ReaderException? get error;
 
   String? get locationLabel => null;
+  List<ReaderContentCoverage> get coverage => const [];
+  bool get contentReady => status == ReaderStatus.ready;
+  bool get atEnd => false;
 }
 
 final class ReaderIdleSnapshot extends ReaderSnapshot {
@@ -88,11 +92,20 @@ final class ReaderReadySnapshot extends ReaderSnapshot {
     this.locator,
     List<ReaderTocEntry> toc = const [],
     this.locationLabel,
+    this.coverage = const [],
+    this.contentReady = true,
+    this.atEnd = false,
   }) : toc = List.unmodifiable(toc);
 
   @override
   ReaderStatus get status => ReaderStatus.ready;
 
+  @override
+  final List<ReaderContentCoverage> coverage;
+  @override
+  final bool contentReady;
+  @override
+  final bool atEnd;
   @override
   final String? locationLabel;
 

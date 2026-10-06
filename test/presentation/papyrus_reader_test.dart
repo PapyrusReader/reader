@@ -55,6 +55,7 @@ void main() {
       double textScale = 1,
       ReaderUiBuilders builders = const ReaderUiBuilders(),
       ReaderLocatorChanged? onLocatorChanged,
+      ValueChanged<ReaderActivityEvent>? onActivity,
       ReaderPreferencesChanged? onPreferencesChanged,
       ReaderPreferences? initialPreferences,
       ReaderThemeData? readerTheme,
@@ -93,6 +94,7 @@ void main() {
             initialPreferences: initialPreferences,
             theme: readerTheme,
             onLocatorChanged: onLocatorChanged,
+            onActivity: onActivity,
             onPreferencesChanged: onPreferencesChanged,
           ),
         ),
@@ -135,6 +137,36 @@ void main() {
       expect(find.text('Custom position 80'), findsOneWidget);
       expect(tester.state(viewport), same(state));
     });
+
+    testWidgets(
+      'generic activity pauses behind panels and observes jumps without page metrics',
+      (tester) async {
+        final events = <ReaderActivityEvent>[];
+        final controller = controllerFor([_UiReaderEngine()]);
+        addTearDown(controller.dispose);
+        await pumpReader(
+          tester,
+          document: document('Activity'),
+          controller: controller,
+          size: const Size(1100, 800),
+          onActivity: events.add,
+        );
+        await tester.pumpAndSettle();
+        expect(events.last.ready, isTrue);
+        expect(events.last.visible, isTrue);
+        expect(events.last.coverage, isEmpty);
+        await controller.goToProgress(.5);
+        await tester.pumpAndSettle();
+        expect(events.last.cause, ReaderNavigationCause.jump);
+        await tester.tap(find.byTooltip('Reading settings'));
+        await tester.pumpAndSettle();
+        expect(events.last.visible, isFalse);
+        await tester.tap(find.byTooltip('Close panel'));
+        await tester.pumpAndSettle();
+        expect(events.last.visible, isTrue);
+        expect(tester.takeException(), isNull);
+      },
+    );
 
     testWidgets('sidebar meets the toolbar border without an empty gap', (
       tester,

@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 
 import '../../domain/reader_capabilities.dart';
+import '../../domain/reader_activity.dart';
 import '../../domain/reader_document.dart';
 import '../../domain/reader_exception.dart';
 import '../../domain/reader_locator.dart';
@@ -58,6 +59,8 @@ final class PdfReaderEngine extends ReaderEngine {
       );
     }
 
+    _exposedPages = const [];
+    _customViewportReady = false;
     PdfFacade? candidate;
     try {
       final bytes = await document.loadBytes();
@@ -176,6 +179,8 @@ final class PdfReaderEngine extends ReaderEngine {
         'The locator is not valid for the current PDF.',
       );
     }
+    _exposedPages = const [];
+    _publish();
     await facade.showPage(locator.pageIndex, locator.pageOffset);
     _locator = locator;
     _publish();
@@ -280,10 +285,36 @@ final class PdfReaderEngine extends ReaderEngine {
     _publish();
   }
 
+  List<int> _exposedPages = const [];
+  bool _customViewportReady = false;
+  void _visiblePagesChanged(List<int> pages) {
+    if (_disposed) return;
+    if (pages.length == _exposedPages.length &&
+        List.generate(
+          pages.length,
+          (i) => pages[i] == _exposedPages[i],
+        ).every((same) => same)) {
+      return;
+    }
+    _exposedPages = List.unmodifiable(pages);
+    _publish();
+  }
+
   void _publish() {
     if (_disposed) return;
     snapshot = ReaderReadySnapshot(
       document: _document!,
+      contentReady: _exposedPages.isNotEmpty || _customViewportReady,
+      coverage: [
+        for (final page in _exposedPages)
+          ReaderContentCoverage(
+            key: 'pdf:$page',
+            start: 0,
+            end: 1,
+            pdfPageIndex: page,
+          ),
+      ],
+      atEnd: _exposedPages.contains(_facade!.pageCount - 1),
       preferences: _preferences,
       capabilities: capabilities,
       locator: _locator,
@@ -311,6 +342,13 @@ final class PdfReaderEngine extends ReaderEngine {
           ReaderColumnMode.automatic => constraints.maxWidth >= 1000,
         };
         _facingPages = facingPages;
+        if (_facadeFactory != null && !_customViewportReady) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (_disposed || !identical(_facade, facade)) return;
+            _customViewportReady = true;
+            _publish();
+          });
+        }
         return facade.buildViewport(
           PdfViewportConfiguration(
             pageIndex: locator.pageIndex,
@@ -320,6 +358,7 @@ final class PdfReaderEngine extends ReaderEngine {
             layoutMode: _preferences.layoutMode,
             onPageChanged: _visiblePageChanged,
             onPositionChanged: _visiblePositionChanged,
+            onVisiblePagesChanged: _visiblePagesChanged,
           ),
         );
       },

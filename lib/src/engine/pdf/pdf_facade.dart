@@ -38,6 +38,7 @@ final class PdfViewportConfiguration {
     required this.layoutMode,
     required this.onPageChanged,
     this.onPositionChanged,
+    this.onVisiblePagesChanged,
   });
 
   final int pageIndex;
@@ -47,6 +48,7 @@ final class PdfViewportConfiguration {
   final ReaderLayoutMode layoutMode;
   final ValueChanged<int> onPageChanged;
   final void Function(int pageIndex, double pageOffset)? onPositionChanged;
+  final ValueChanged<List<int>>? onVisiblePagesChanged;
 }
 
 abstract interface class PdfFacade {
@@ -373,6 +375,18 @@ final class _PdfrxFacade implements PdfFacade, DisposablePdfFacade {
               0.0,
               1.0,
             );
+      final visible = _controller.visibleRect;
+      final exposed = <int>[];
+      for (var i = 0; i < _controller.layout.pageLayouts.length; i++) {
+        final rect = _controller.layout.pageLayouts[i];
+        if (!rect.overlaps(visible)) continue;
+        final intersection = rect.intersect(visible);
+        if (intersection.width * intersection.height >=
+            rect.width * rect.height * .25) {
+          exposed.add(i);
+        }
+      }
+      config?.onVisiblePagesChanged?.call(exposed);
       _pageIndex = index;
       _pageOffset = offset;
       if (config?.onPositionChanged != null) {

@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 
 import '../domain/reader_document.dart';
+import '../domain/reader_activity.dart';
 import '../domain/reader_exception.dart';
 import '../domain/reader_locator.dart';
 import '../domain/reader_preferences.dart';
@@ -32,6 +33,7 @@ final class ReaderController extends ChangeNotifier {
   bool _isDisposed = false;
 
   ReaderSnapshot get snapshot => _snapshot;
+  ReaderNavigationCause navigationCause = ReaderNavigationCause.restore;
 
   ReaderPreferences get preferences => _snapshot.preferences;
 
@@ -57,6 +59,7 @@ final class ReaderController extends ChangeNotifier {
       candidate.dispose();
     }
     _loadingEngines.clear();
+    navigationCause = ReaderNavigationCause.restore;
     final request = _ReaderLoadRequest(
       id: ++_latestLoadId,
       document: document,
@@ -126,6 +129,7 @@ final class ReaderController extends ChangeNotifier {
   }
 
   Future<void> goTo(ReaderLocator locator) async {
+    navigationCause = ReaderNavigationCause.jump;
     await _requireReadyEngine().goTo(locator);
   }
 
@@ -138,14 +142,17 @@ final class ReaderController extends ChangeNotifier {
       );
     }
 
+    navigationCause = ReaderNavigationCause.jump;
     await _requireReadyEngine().goToProgress(progress);
   }
 
   Future<void> goNext() async {
+    navigationCause = ReaderNavigationCause.turn;
     await _requireReadyEngine().goNext();
   }
 
   Future<void> goPrevious() async {
+    navigationCause = ReaderNavigationCause.turn;
     await _requireReadyEngine().goPrevious();
   }
 
@@ -154,6 +161,7 @@ final class ReaderController extends ChangeNotifier {
   }
 
   Future<void> updatePreferences(ReaderPreferences preferences) async {
+    navigationCause = ReaderNavigationCause.reflow;
     await _requireReadyEngine().updatePreferences(preferences);
     _syncFromEngine();
   }

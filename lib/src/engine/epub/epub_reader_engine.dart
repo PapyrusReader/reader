@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 
 import '../../domain/reader_capabilities.dart';
+import '../../domain/reader_activity.dart';
 import '../../domain/reader_document.dart';
 import '../../domain/reader_exception.dart';
 import '../../domain/reader_locator.dart';
@@ -45,6 +46,9 @@ final class EpubReaderEngine extends ReaderEngine {
   bool _disposed = false;
   int _visiblePage = 1;
   int _pageCount = 0;
+  List<ReaderContentCoverage> _coverage = const [];
+  bool _viewportReady = false;
+  bool _atEnd = false;
 
   /// The mounted viewport handles local page/scroll turns. The engine crosses
   /// the spine only when that viewport reports a boundary.
@@ -169,6 +173,9 @@ final class EpubReaderEngine extends ReaderEngine {
   }
 
   void _setChapter(Map<String, Object?> chapter, EpubReaderLocator target) {
+    _coverage = const [];
+    _viewportReady = false;
+    _atEnd = false;
     _currentChapterHtml = chapter['html'] as String;
     _blocks = [
       for (final block in chapter['blocks'] as List)
@@ -212,6 +219,9 @@ final class EpubReaderEngine extends ReaderEngine {
       );
     }
     final generation = ++_navigationGeneration;
+    _coverage = const [];
+    _viewportReady = false;
+    _atEnd = false;
     if (locator.spineIndex == _locator?.spineIndex) {
       final offset = locator.anchor == null
           ? locator.textOffset
@@ -291,6 +301,40 @@ final class EpubReaderEngine extends ReaderEngine {
     _publish();
   }
 
+  void viewportCoverageChanged(int start, int end, {bool atEnd = false}) {
+    if (_disposed || _locator == null) return;
+    final coverage = _contentLength > 0 && end > start
+        ? ReaderContentCoverage(
+            key: 'epub:${_locator!.spineIndex}:$_contentLength',
+            start: start / _contentLength,
+            end: (end / _contentLength).clamp(0, 1),
+            chapterCount: _chapterCount,
+          )
+        : null;
+    final nextEnd = atEnd && _locator!.spineIndex == _chapterCount - 1;
+    if (_viewportReady &&
+        _atEnd == nextEnd &&
+        (coverage == null
+            ? _coverage.isEmpty
+            : _coverage.length == 1 &&
+                  _coverage.first.key == coverage.key &&
+                  _coverage.first.start == coverage.start &&
+                  _coverage.first.end == coverage.end)) {
+      return;
+    }
+    _viewportReady = true;
+    _coverage = coverage == null ? const [] : [coverage];
+    _atEnd = nextEnd;
+    _publish();
+  }
+
+  void viewportPreparing() {
+    if (_disposed || !_viewportReady) return;
+    _viewportReady = false;
+    _coverage = const [];
+    _publish();
+  }
+
   void viewportPaginationChanged(int count, int visiblePage) {
     if (_disposed || (_pageCount == count && _visiblePage == visiblePage)) {
       return;
@@ -312,6 +356,9 @@ final class EpubReaderEngine extends ReaderEngine {
     }
     if (_preferences == preferences) return;
     _preferences = preferences;
+    _coverage = const [];
+    _viewportReady = false;
+    _atEnd = false;
     _restorationRevision++;
     _publish();
   }
@@ -320,6 +367,9 @@ final class EpubReaderEngine extends ReaderEngine {
     if (_disposed) return;
     snapshot = ReaderReadySnapshot(
       document: _document!,
+      coverage: _coverage,
+      contentReady: _viewportReady,
+      atEnd: _atEnd,
       preferences: _preferences,
       capabilities: capabilities,
       locator: _locator,
