@@ -45,3 +45,19 @@ loads the worker through `rootBundle` and creates a local Blob URL. A restrictiv
 Content Security Policy must allow `worker-src blob:`; do not fall back silently
 to main-thread parsing if worker initialization fails. Offline deployment must
 cache the packaged worker alongside other Flutter assets.
+
+## Optional activity observations
+
+`PapyrusReader(onActivity: ...)` reports `ReaderActivityEvent` readiness, visibility,
+locator, navigation cause, exposed stable coverage, and end-of-document state.
+The callback is optional and independent of Goals. Existing locator callbacks and
+version-1 locators remain unchanged. Hosts own clocks, foreground lifecycle,
+completion confirmation, persistence, and aggregation.
+
+Settings and contents panels mark content obscured. EPUB coverage uses normalized
+chapter UTF-16 content extents, with spine count for host calibration; PDF coverage
+lists actually exposed page indices, including spreads. Jumps never expose skipped
+pages. Engines without page metrics retain time tracking through ready snapshots.
+Parsing remains in the existing worker/isolate transports; activity reporting does
+not require whole-book layout. Reflow reports coverage without changing the
+restored locator's precise content offset.

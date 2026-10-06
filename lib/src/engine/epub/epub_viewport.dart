@@ -119,6 +119,11 @@ final class _EpubViewportState extends State<EpubViewport> {
       _busy = false;
       if (_layoutReady?.isCompleted == false) _layoutReady!.complete();
       widget.engine.viewportPaginationChanged(pages.length, target + 1);
+      if (widget.engine.preferences.layoutMode == ReaderLayoutMode.paginated) {
+        _publishCoverage(_pageIndex * _columns);
+      } else {
+        _scrollChanged();
+      }
     });
   }
 
@@ -159,6 +164,18 @@ final class _EpubViewportState extends State<EpubViewport> {
       textOffset: _pages[page].offset,
       pageNumber: page + 1,
     );
+    _publishCoverage(page);
+  }
+
+  void _publishCoverage(int page) {
+    final after = math.min(page + _columns, _pages.length);
+    widget.engine.viewportCoverageChanged(
+      _pages[page].offset,
+      after < _pages.length
+          ? _pages[after].offset
+          : widget.engine.contentLength,
+      atEnd: after == _pages.length,
+    );
   }
 
   void _scrollChanged() {
@@ -184,6 +201,21 @@ final class _EpubViewportState extends State<EpubViewport> {
       max <= 0 ? 0 : (pixels / max).clamp(0, 1),
       textOffset: offset,
       pageNumber: index + 1,
+    );
+    final bottom = pixels + _scrollController.position.viewportDimension;
+    var lastOffset = offset;
+    for (var i = index; i < _pages.length && _scrollOffsets[i] < bottom; i++) {
+      var top = _scrollOffsets[i] + widget.engine.preferences.pageMargins.top;
+      for (final fragment in _pages[i].fragments) {
+        if (top >= bottom) break;
+        lastOffset = fragment.block.offset + fragment.end;
+        top += fragment.height + fragment.spacing(widget.engine.preferences);
+      }
+    }
+    widget.engine.viewportCoverageChanged(
+      offset,
+      lastOffset.clamp(0, widget.engine.contentLength),
+      atEnd: pixels >= max - 1,
     );
   }
 
@@ -219,6 +251,9 @@ final class _EpubViewportState extends State<EpubViewport> {
     final preferences = widget.engine.preferences;
     if (preferences.layoutMode == ReaderLayoutMode.scroll &&
         widget.engine.renderer != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.engine.viewportCoverageChanged(0, 0);
+      });
       return EpubScrollViewport(
         xhtml: widget.engine.currentChapterHtml,
         preferences: preferences,
@@ -265,6 +300,11 @@ final class _EpubViewportState extends State<EpubViewport> {
           );
           if (_layoutKey != key) {
             _layoutKey = key;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted && _layoutKey == key && _busy) {
+                widget.engine.viewportPreparing();
+              }
+            });
             _restoration = -1;
             _restoring = true;
             final generation = ++_layoutGeneration;

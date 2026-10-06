@@ -2,6 +2,7 @@ library;
 
 export 'src/controller/reader_controller.dart';
 export 'src/domain/reader_capabilities.dart';
+export 'src/domain/reader_activity.dart';
 export 'src/domain/reader_document.dart';
 export 'src/domain/reader_exception.dart';
 export 'src/domain/reader_locator.dart';
