@@ -135,6 +135,43 @@ void main() {
       expect(notifications, 1);
     });
 
+    test(
+      'command causes are scoped and subsequent engine navigation is a viewport change',
+      () async {
+        await controller.load(document);
+        final jump = EpubReaderLocator(
+          cfi: 'epubcfi(/6/4)',
+          spineIndex: 1,
+          localProgression: 0,
+          totalProgression: .2,
+        );
+        final viewport = EpubReaderLocator(
+          cfi: 'epubcfi(/6/4)',
+          spineIndex: 1,
+          localProgression: .5,
+          totalProgression: .3,
+        );
+        final observed = <ReaderNavigationCause>[];
+        controller.addListener(() => observed.add(controller.navigationCause));
+        engine.locatorOnNavigation = jump;
+        engine.navigationGate = Completer<void>();
+        final command = controller.goTo(jump);
+        expect(observed.last, ReaderNavigationCause.jump);
+        engine.navigationGate!.complete();
+        await command;
+        engine.emitLocator(viewport);
+        expect(observed.last, ReaderNavigationCause.viewport);
+        await controller.goNext();
+        engine.emitLocator(jump);
+        expect(observed.last, ReaderNavigationCause.viewport);
+        await controller.updatePreferences(
+          const ReaderPreferences(fontSize: 20),
+        );
+        engine.emitLocator(viewport);
+        expect(observed.last, ReaderNavigationCause.viewport);
+      },
+    );
+
     test('delegates navigation and current location', () async {
       await controller.load(document);
       final locator = EpubReaderLocator(

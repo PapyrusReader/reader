@@ -139,6 +139,49 @@ void main() {
     });
 
     testWidgets(
+      'a host rebuilding on activity does not create a frame feedback loop',
+      (tester) async {
+        final events = <ReaderActivityEvent>[];
+        final controller = controllerFor([_UiReaderEngine()]);
+        final book = document('Host rebuild');
+        addTearDown(controller.dispose);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: StatefulBuilder(
+              builder: (context, rebuild) {
+                return PapyrusReader(
+                  document: book,
+                  controller: controller,
+                  onActivity: (event) {
+                    events.add(event);
+                    rebuild(() {});
+                  },
+                );
+              },
+            ),
+          ),
+        );
+        await tester.pumpAndSettle(
+          const Duration(milliseconds: 50),
+          EnginePhase.sendSemanticsUpdate,
+          const Duration(seconds: 5),
+        );
+        final count = events.length;
+        expect(events.last.ready, isTrue);
+        expect(count, lessThan(5));
+        for (var i = 0; i < 10; i++) {
+          await tester.pump(const Duration(milliseconds: 50));
+        }
+        expect(events.length, count);
+        await controller.goToProgress(.5);
+        await tester.pumpAndSettle();
+        expect(events.length, count + 1);
+        expect(events.last.cause, ReaderNavigationCause.jump);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets(
       'generic activity pauses behind panels and observes jumps without page metrics',
       (tester) async {
         final events = <ReaderActivityEvent>[];

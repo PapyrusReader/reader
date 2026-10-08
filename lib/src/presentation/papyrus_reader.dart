@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../controller/reader_controller.dart';
@@ -88,6 +89,9 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
   final FocusNode _controlsToggleFocusNode = FocusNode(
     debugLabel: 'reader controls toggle',
   );
+
+  ReaderActivityEvent? _lastActivity;
+  bool _activityReportScheduled = false;
 
   bool get _isCommandBusy => _pendingCommands > 0;
 
@@ -274,26 +278,38 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
     _reportActivity();
   }
 
+  void _scheduleActivityReport() {
+    if (_activityReportScheduled) return;
+    _activityReportScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _activityReportScheduled = false;
+      _reportActivity();
+    });
+  }
+
   void _reportActivity() {
     if (!mounted) return;
+    if (WidgetsBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      _scheduleActivityReport();
+      return;
+    }
     final snapshot = _controller.snapshot;
-    _invokeHostCallback(
-      () => widget.onActivity?.call(
-        ReaderActivityEvent(
-          ready: snapshot.contentReady,
-          visible:
-              snapshot.contentReady &&
-              _panel == _ReaderPanel.none &&
-              _compactPanelRoute == null &&
-              (ModalRoute.of(context)?.isCurrent ?? true),
-          cause: _controller.navigationCause,
-          locator: snapshot.locator,
-          coverage: snapshot.coverage,
-          atEnd: snapshot.atEnd,
-        ),
-      ),
-      'onActivity',
+    final event = ReaderActivityEvent(
+      ready: snapshot.contentReady,
+      visible:
+          snapshot.contentReady &&
+          _panel == _ReaderPanel.none &&
+          _compactPanelRoute == null &&
+          (ModalRoute.of(context)?.isCurrent ?? true),
+      cause: _controller.navigationCause,
+      locator: snapshot.locator,
+      coverage: snapshot.coverage,
+      atEnd: snapshot.atEnd,
     );
+    if (event == _lastActivity || widget.onActivity == null) return;
+    _lastActivity = event;
+    _invokeHostCallback(() => widget.onActivity!(event), 'onActivity');
   }
 
   void _invokeHostCallback(VoidCallback callback, String name) {
@@ -328,7 +344,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
 
   @override
   Widget build(BuildContext context) {
-    WidgetsBinding.instance.addPostFrameCallback((_) => _reportActivity());
+    _scheduleActivityReport();
     final snapshot = _controller.snapshot;
     final ambient = Theme.of(context);
     final readerTheme = snapshot.status == ReaderStatus.ready
