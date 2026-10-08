@@ -60,7 +60,7 @@ final class PdfReaderEngine extends ReaderEngine {
     }
 
     _exposedPages = const [];
-    _customViewportReady = false;
+    _viewportReady = null;
     PdfFacade? candidate;
     try {
       final bytes = await document.loadBytes();
@@ -180,6 +180,7 @@ final class PdfReaderEngine extends ReaderEngine {
       );
     }
     _exposedPages = const [];
+    _viewportReady = null;
     _publish();
     await facade.showPage(locator.pageIndex, locator.pageOffset);
     _locator = locator;
@@ -286,7 +287,13 @@ final class PdfReaderEngine extends ReaderEngine {
   }
 
   List<int> _exposedPages = const [];
-  bool _customViewportReady = false;
+  bool? _viewportReady;
+  void _contentReadyChanged(bool ready) {
+    if (_disposed || _viewportReady == ready) return;
+    _viewportReady = ready;
+    _publish();
+  }
+
   void _visiblePagesChanged(List<int> pages) {
     if (_disposed) return;
     if (pages.length == _exposedPages.length &&
@@ -304,7 +311,7 @@ final class PdfReaderEngine extends ReaderEngine {
     if (_disposed) return;
     snapshot = ReaderReadySnapshot(
       document: _document!,
-      contentReady: _exposedPages.isNotEmpty || _customViewportReady,
+      contentReady: _viewportReady ?? _exposedPages.isNotEmpty,
       coverage: [
         for (final page in _exposedPages)
           ReaderContentCoverage(
@@ -342,10 +349,14 @@ final class PdfReaderEngine extends ReaderEngine {
           ReaderColumnMode.automatic => constraints.maxWidth >= 1000,
         };
         _facingPages = facingPages;
-        if (_facadeFactory != null && !_customViewportReady) {
+        if (_facadeFactory != null && _viewportReady == null) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (_disposed || !identical(_facade, facade)) return;
-            _customViewportReady = true;
+            if (_disposed ||
+                !identical(_facade, facade) ||
+                _viewportReady != null) {
+              return;
+            }
+            _viewportReady = true;
             _publish();
           });
         }
@@ -359,6 +370,7 @@ final class PdfReaderEngine extends ReaderEngine {
             onPageChanged: _visiblePageChanged,
             onPositionChanged: _visiblePositionChanged,
             onVisiblePagesChanged: _visiblePagesChanged,
+            onContentReadyChanged: _contentReadyChanged,
           ),
         );
       },

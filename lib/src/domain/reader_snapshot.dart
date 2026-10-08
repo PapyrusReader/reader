@@ -92,10 +92,11 @@ final class ReaderReadySnapshot extends ReaderSnapshot {
     this.locator,
     List<ReaderTocEntry> toc = const [],
     this.locationLabel,
-    this.coverage = const [],
+    List<ReaderContentCoverage> coverage = const [],
     this.contentReady = true,
     this.atEnd = false,
-  }) : toc = List.unmodifiable(toc);
+  }) : toc = List.unmodifiable(toc),
+       coverage = List.unmodifiable(coverage);
 
   @override
   ReaderStatus get status => ReaderStatus.ready;

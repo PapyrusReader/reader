@@ -39,6 +39,7 @@ final class PdfViewportConfiguration {
     required this.onPageChanged,
     this.onPositionChanged,
     this.onVisiblePagesChanged,
+    this.onContentReadyChanged,
   });
 
   final int pageIndex;
@@ -49,6 +50,7 @@ final class PdfViewportConfiguration {
   final ValueChanged<int> onPageChanged;
   final void Function(int pageIndex, double pageOffset)? onPositionChanged;
   final ValueChanged<List<int>>? onVisiblePagesChanged;
+  final ValueChanged<bool>? onContentReadyChanged;
 }
 
 abstract interface class PdfFacade {
@@ -274,6 +276,12 @@ final class _PdfrxFacade implements PdfFacade, DisposablePdfFacade {
           _viewKey = key;
           _viewerRevision++;
           _restoring = true;
+          final revision = _viewerRevision;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!_disposed && _restoring && revision == _viewerRevision) {
+              _configuration?.onContentReadyChanged?.call(false);
+            }
+          });
         }
         final revision = _viewerRevision;
         return applyPdfBrightness(
@@ -376,17 +384,12 @@ final class _PdfrxFacade implements PdfFacade, DisposablePdfFacade {
               1.0,
             );
       final visible = _controller.visibleRect;
-      final exposed = <int>[];
-      for (var i = 0; i < _controller.layout.pageLayouts.length; i++) {
-        final rect = _controller.layout.pageLayouts[i];
-        if (!rect.overlaps(visible)) continue;
-        final intersection = rect.intersect(visible);
-        if (intersection.width * intersection.height >=
-            rect.width * rect.height * .25) {
-          exposed.add(i);
-        }
-      }
-      config?.onVisiblePagesChanged?.call(exposed);
+      final exposure = pdfViewportExposure(
+        _controller.layout.pageLayouts,
+        visible,
+      );
+      config?.onVisiblePagesChanged?.call(exposure.pages);
+      config?.onContentReadyChanged?.call(exposure.contentVisible);
       _pageIndex = index;
       _pageOffset = offset;
       if (config?.onPositionChanged != null) {
@@ -406,6 +409,25 @@ final class _PdfrxFacade implements PdfFacade, DisposablePdfFacade {
     _releaseDocument?.call();
     _configuration = null;
   }
+}
+
+/// Visible content permits time tracking even when zoom prevents page qualification.
+({bool contentVisible, List<int> pages}) pdfViewportExposure(
+  List<Rect> pages,
+  Rect viewport,
+) {
+  var contentVisible = false;
+  final qualified = <int>[];
+  for (var i = 0; i < pages.length; i++) {
+    final rect = pages[i];
+    if (!rect.overlaps(viewport)) continue;
+    final intersection = rect.intersect(viewport);
+    final area = intersection.width * intersection.height;
+    if (area <= 0) continue;
+    contentVisible = true;
+    if (area >= rect.width * rect.height * .25) qualified.add(i);
+  }
+  return (contentVisible: contentVisible, pages: qualified);
 }
 
 PdfViewerParams buildPdfViewerParams(
