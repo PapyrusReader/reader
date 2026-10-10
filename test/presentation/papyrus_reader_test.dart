@@ -1196,6 +1196,70 @@ void main() {
       },
     );
 
+    testWidgets(
+      'wide panels follow the actual changing custom toolbar height',
+      (tester) async {
+        final engine = _UiReaderEngine();
+        final controller = controllerFor([engine]);
+        final height = ValueNotifier<double>(96);
+        addTearDown(controller.dispose);
+        addTearDown(height.dispose);
+        await pumpReader(
+          tester,
+          document: document('Tall custom toolbar'),
+          controller: controller,
+          size: const Size(1100, 800),
+          builders: ReaderUiBuilders(
+            toolbar: (context, state) => ValueListenableBuilder<double>(
+              valueListenable: height,
+              builder: (context, value, child) => SizedBox(
+                height: value,
+                child: Align(
+                  alignment: Alignment.bottomRight,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextButton(
+                        onPressed: state.openSettings,
+                        child: const Text('Host settings'),
+                      ),
+                      TextButton(
+                        onPressed: state.openTableOfContents,
+                        child: const Text('Host contents'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final viewport = find.byKey(const ValueKey('reader-viewport'));
+        final viewportBounds = tester.getRect(viewport);
+        final panel = find.byKey(const ValueKey('reader-side-panel'));
+        await tester.tap(find.text('Host settings'));
+        await tester.pump();
+        expect(tester.getRect(panel).top, 96);
+        expect(tester.getRect(viewport), viewportBounds);
+        await tester.tap(find.text('Host contents'));
+        await tester.pump();
+        expect(find.text('Chapter one'), findsOneWidget);
+        height.value = 128;
+        await tester.pump();
+        expect(tester.getRect(panel).top, 128);
+        expect(tester.getRect(viewport), viewportBounds);
+        await tester.tap(find.text('Host settings'));
+        await tester.pump();
+        expect(find.text('Reading mode'), findsOneWidget);
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pump();
+        expect(panel, findsNothing);
+        expect(tester.getRect(viewport), viewportBounds);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
     testWidgets('wide panels restore a custom toolbar opener', (tester) async {
       final engine = _UiReaderEngine();
       final controller = controllerFor([engine]);
