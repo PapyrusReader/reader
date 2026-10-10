@@ -10,11 +10,10 @@ host-owned and must be disposed by the host. Engine factories must return fresh
 instances. Observers should enqueue durable host writes, with a flush on close,
 background and profile changes. The package never writes account-scoped data.
 
-Serialize `ReaderLocator.toJson()` in full. Existing version-1 EPUB and PDF
-locators remain readable. New EPUB positions may include `textOffset` and `anchor`;
-these fields improve reflow and TOC restoration without a database migration.
-Do not interpret legacy EPUB CFI strings as standardized CFI positions. A custom
-HTML scrolling renderer continues to use approximate progression restoration.
+Serialize `ReaderLocator.toJson()` in full. EPUB positions use `spineIndex`,
+`textOffset`, and an optional `anchor`. Custom HTML scrolling renderers use
+approximate progression restoration. EPUB locators do not contain CFI strings;
+standardized EPUB CFI interoperability is not implemented.
 
 PDF stores `pageIndex`, `pageOffset` and `totalProgression`. A custom facade can
 report intra-page offsets through `PdfViewportConfiguration.onPositionChanged`.
@@ -50,8 +49,7 @@ cache the packaged worker alongside other Flutter assets.
 
 `PapyrusReader(onActivity: ...)` reports `ReaderActivityEvent` readiness, visibility,
 locator, navigation cause, exposed stable coverage, and end-of-document state.
-The callback is optional and independent of Goals. Existing locator callbacks and
-version-1 locators remain unchanged. Hosts own clocks, foreground lifecycle,
+The callback is optional and independent of Goals. Hosts own clocks, foreground lifecycle,
 completion confirmation, persistence, and aggregation.
 
 Settings and contents panels mark content obscured. EPUB coverage uses normalized

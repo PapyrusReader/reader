@@ -59,6 +59,7 @@ void main() {
       ReaderPreferencesChanged? onPreferencesChanged,
       ReaderPreferences? initialPreferences,
       ReaderThemeData? readerTheme,
+      VoidCallback? onBack,
     }) async {
       tester.view.physicalSize = size;
       tester.view.devicePixelRatio = 1;
@@ -93,6 +94,7 @@ void main() {
             builders: builders,
             initialPreferences: initialPreferences,
             theme: readerTheme,
+            onBack: onBack,
             onLocatorChanged: onLocatorChanged,
             onActivity: onActivity,
             onPreferencesChanged: onPreferencesChanged,
@@ -132,7 +134,7 @@ void main() {
       expect(find.text('Custom position 80'), findsOneWidget);
       expect(tester.state(viewport), same(state));
 
-      await tester.tap(find.byTooltip('Hide controls'));
+      await toggleReaderControls(tester);
       await tester.pumpAndSettle();
       expect(find.text('Custom position 80'), findsOneWidget);
       expect(tester.state(viewport), same(state));
@@ -211,7 +213,37 @@ void main() {
       },
     );
 
-    testWidgets('sidebar meets the toolbar border without an empty gap', (
+    testWidgets('reader header matches the standard book-details app bar', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(useMaterial3: false),
+          home: Scaffold(
+            appBar: AppBar(leading: BackButton(onPressed: () {})),
+          ),
+        ),
+      );
+      final appBar = tester.getRect(find.byType(AppBar));
+      final backIcon = tester.getRect(find.byType(BackButtonIcon));
+      final controller = controllerFor([_UiReaderEngine()]);
+      addTearDown(controller.dispose);
+      await pumpReader(
+        tester,
+        document: document('Header'),
+        controller: controller,
+        size: const Size(390, 844),
+        onBack: () {},
+      );
+      await tester.pumpAndSettle();
+      expect(tester.getRect(find.byType(AppBar)), appBar);
+      expect(tester.getRect(find.byType(BackButtonIcon)), backIcon);
+      expect(find.text('The Header Reader'), findsNothing);
+    });
+
+    testWidgets('sidebar is flush with the toolbar and screen edges', (
       tester,
     ) async {
       final controller = controllerFor([_UiReaderEngine()]);
@@ -228,15 +260,13 @@ void main() {
       final toolbar = tester.getRect(
         find.byKey(const ValueKey('reader-toolbar')),
       );
-      final border = tester.getRect(
-        find.byKey(const ValueKey('reader-toolbar-border')),
-      );
       final panel = tester.getRect(
         find.byKey(const ValueKey('reader-side-panel')),
       );
-      expect(border.top, toolbar.bottom);
-      expect(border.height, 1);
-      expect(panel.top, border.bottom);
+      expect(panel.top, toolbar.bottom);
+      expect(panel.right, 1200);
+      expect(panel.bottom, 1000);
+      expect(toolbar, const Rect.fromLTWH(0, 0, 1200, 56));
       // The panel header keeps its border; text settings have no separator.
       expect(
         find.descendant(
@@ -264,21 +294,26 @@ void main() {
           final viewport = find.byKey(const ValueKey('reader-viewport'));
           final element = tester.element(viewport);
           final height = tester.getSize(viewport).height;
+          expect(height, 844);
+          expect(tester.getTopLeft(viewport), Offset.zero);
+          expect(find.byTooltip('Hide controls'), findsNothing);
           if (width > 720) {
             await tester.tap(find.byTooltip('Reading settings'));
             await tester.pumpAndSettle();
+            await tester.tap(find.byTooltip('Close panel'));
+            await tester.pumpAndSettle();
           }
-          await tester.tap(find.byTooltip('Hide controls'));
+          await toggleReaderControls(tester);
           await tester.pumpAndSettle();
-          expect(find.byKey(const ValueKey('reader-toolbar')), findsNothing);
           expect(
-            find.byKey(const ValueKey('reader-progress-controls')),
+            find.byTooltip('Reading settings').hitTestable(),
             findsNothing,
           );
+          expect(find.byTooltip('Next').hitTestable(), findsNothing);
           expect(find.byKey(const ValueKey('reader-side-panel')), findsNothing);
-          expect(find.byTooltip('Show controls'), findsOneWidget);
+          expect(find.byTooltip('Reading settings'), findsNothing);
           expect(tester.element(viewport), same(element));
-          expect(tester.getSize(viewport), Size(width, 844));
+          expect(tester.getSize(viewport), Size(width, height));
           await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
           await tester.pumpAndSettle();
           await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
@@ -286,19 +321,19 @@ void main() {
           expect(engine.goNextCallCount, 1);
           expect(engine.goPreviousCallCount, 1);
           final locator = controller.snapshot.locator;
-          await tester.tap(find.byTooltip('Show controls'));
+          await toggleReaderControls(tester);
           await tester.pumpAndSettle();
           expect(tester.element(viewport), same(element));
           expect(tester.getSize(viewport).height, height);
           expect(controller.snapshot.locator, locator);
-          await tester.tap(find.byTooltip('Hide controls'));
+          await toggleReaderControls(tester);
           await tester.pumpAndSettle();
           await tester.sendKeyEvent(LogicalKeyboardKey.escape);
           await tester.pumpAndSettle();
           expect(find.byTooltip('Reading settings'), findsOneWidget);
           expect(find.byTooltip('Next'), findsOneWidget);
           // Opening a different book must restore its exit/navigation controls.
-          await tester.tap(find.byTooltip('Hide controls'));
+          await toggleReaderControls(tester);
           await tester.pumpAndSettle();
           await pumpReader(
             tester,
@@ -307,7 +342,7 @@ void main() {
             size: Size(width, 844),
           );
           await tester.pumpAndSettle();
-          expect(find.byTooltip('Hide controls'), findsOneWidget);
+          expect(find.byTooltip('Reading settings'), findsOneWidget);
           final replacement = tester
               .widget<PapyrusReader>(find.byType(PapyrusReader))
               .controller!;
@@ -330,7 +365,7 @@ void main() {
           controller: controller,
         );
         await tester.pumpAndSettle();
-        await tester.tap(find.byTooltip('Hide controls'));
+        await toggleReaderControls(tester);
         await tester.pumpAndSettle();
         FocusManager.instance.rootScope.requestFocus();
         await tester.pump();
@@ -341,7 +376,7 @@ void main() {
         await tester.pump();
         await tester.sendKeyEvent(LogicalKeyboardKey.escape);
         await tester.pumpAndSettle();
-        expect(find.byTooltip('Hide controls'), findsOneWidget);
+        expect(find.byTooltip('Reading settings'), findsOneWidget);
       },
     );
 
@@ -357,7 +392,7 @@ void main() {
         controller: controller,
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Hide controls'));
+      await toggleReaderControls(tester);
       await tester.pumpAndSettle();
       final context = tester.element(find.byType(PapyrusReader));
       final dialog = showDialog<void>(
@@ -376,39 +411,42 @@ void main() {
       Navigator.of(context).pop();
       await tester.pumpAndSettle();
       await dialog;
-      expect(find.byTooltip('Show controls'), findsOneWidget);
+      expect(find.byTooltip('Reading settings'), findsNothing);
     });
 
-    testWidgets(
-      'the controls toggle retains one accessible button through reflow',
-      (tester) async {
-        final semantics = tester.ensureSemantics();
-        final controller = controllerFor([_UiReaderEngine()]);
-        addTearDown(controller.dispose);
-        await pumpReader(
-          tester,
-          document: document('Accessible focus'),
-          controller: controller,
-        );
-        await tester.pumpAndSettle();
-        final before = tester
-            .getSemantics(find.bySemanticsLabel('Hide controls'))
-            .id;
-        await tester.tap(find.byTooltip('Hide controls'));
-        await tester.pumpAndSettle();
-        expect(
-          tester.getSemantics(find.bySemanticsLabel('Show controls')).id,
-          before,
-        );
-        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-        await tester.pumpAndSettle();
-        expect(
-          tester.getSemantics(find.bySemanticsLabel('Hide controls')).id,
-          before,
-        );
-        semantics.dispose();
-      },
-    );
+    testWidgets('reading surface exposes accessible controls actions', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      final controller = controllerFor([_UiReaderEngine()]);
+      addTearDown(controller.dispose);
+      await pumpReader(
+        tester,
+        document: document('Accessible focus'),
+        controller: controller,
+      );
+      await tester.pumpAndSettle();
+      final surface = find.byKey(const ValueKey('reader-surface-actions'));
+      final actions = tester
+          .widget<Semantics>(surface)
+          .properties
+          .customSemanticsActions!;
+      expect(actions.keys.single.label, 'Hide reading controls');
+      actions.values.single();
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Reading settings'), findsNothing);
+      final hiddenActions = tester
+          .widget<Semantics>(surface)
+          .properties
+          .customSemanticsActions!;
+      expect(hiddenActions.keys.single.label, 'Show reading controls');
+      hiddenActions.values.single();
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Reading settings'), findsOneWidget);
+      expect(find.byTooltip('Show controls'), findsNothing);
+      expect(find.byTooltip('Hide controls'), findsNothing);
+      semantics.dispose();
+    });
 
     testWidgets(
       'custom toolbars can enter focus mode and restore with Escape',
@@ -430,7 +468,7 @@ void main() {
         await tester.tap(find.text('Focus'));
         await tester.pumpAndSettle();
         expect(find.text('Focus'), findsNothing);
-        expect(find.byTooltip('Show controls'), findsOneWidget);
+        expect(find.byTooltip('Reading settings'), findsNothing);
         await tester.sendKeyEvent(LogicalKeyboardKey.escape);
         await tester.pumpAndSettle();
         expect(find.text('Focus'), findsOneWidget);
@@ -590,86 +628,123 @@ void main() {
         tester,
         document: document('Loading'),
         controller: controller,
+        onBack: () {},
       );
 
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
-      expect(find.text('Opening The Loading Reader…'), findsOneWidget);
+      expect(find.byTooltip('Back'), findsNothing);
+      expect(find.text('Opening The Loading Reader…'), findsNothing);
+      expect(
+        tester.getCenter(find.byType(CircularProgressIndicator)),
+        const Offset(300, 400),
+      );
 
       gate.complete();
       await tester.pumpAndSettle();
 
       expect(find.byKey(const ValueKey('reader-viewport')), findsOneWidget);
-      expect(find.text('The Loading Reader'), findsOneWidget);
+      expect(find.text('The Loading Reader'), findsNothing);
+      expect(find.byTooltip('Reading settings'), findsOneWidget);
       expect(find.byTooltip('Table of contents'), findsOneWidget);
       expect(find.byTooltip('Reading settings'), findsOneWidget);
     });
 
-    testWidgets('compact chrome opens TOC and settings as bottom sheets', (
-      tester,
-    ) async {
-      final engine = _UiReaderEngine();
-      final controller = controllerFor([engine]);
-      addTearDown(controller.dispose);
-      await pumpReader(
-        tester,
-        document: document('Compact'),
-        controller: controller,
+    Route<void> hostPanelRoute(
+      BuildContext context,
+      ReaderPanelRouteContext panel,
+    ) {
+      return ModalBottomSheetRoute<void>(
+        isScrollControlled: true,
+        builder: (context) => SizedBox(
+          height: 700,
+          child: Column(
+            children: [
+              Text(panel.title),
+              Expanded(child: panel.buildContent(context, null)),
+            ],
+          ),
+        ),
       );
-      await tester.pumpAndSettle();
+    }
 
-      await tester.tap(find.byTooltip('Table of contents'));
-      await tester.pumpAndSettle();
+    for (final host in [false, true]) {
+      testWidgets(
+        'compact chrome opens TOC and settings as bottom sheets (host: $host)',
+        (tester) async {
+          final engine = _UiReaderEngine();
+          final controller = controllerFor([engine]);
+          addTearDown(controller.dispose);
+          await pumpReader(
+            tester,
+            document: document('Compact'),
+            controller: controller,
+            builders: ReaderUiBuilders(
+              compactPanelRoute: host ? hostPanelRoute : null,
+            ),
+          );
+          await tester.pumpAndSettle();
 
-      expect(find.byType(BottomSheet), findsOneWidget);
-      expect(find.text('Chapter one'), findsOneWidget);
+          await tester.tap(find.byTooltip('Table of contents'));
+          await tester.pumpAndSettle();
 
-      Navigator.of(tester.element(find.byType(BottomSheet))).pop();
-      await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Reading settings'));
-      await tester.pumpAndSettle();
+          expect(find.byType(BottomSheet), findsOneWidget);
+          expect(find.text('Chapter one'), findsOneWidget);
 
-      expect(find.byType(BottomSheet), findsOneWidget);
-      expect(find.text('Reading mode'), findsOneWidget);
-    });
+          Navigator.of(tester.element(find.byType(BottomSheet))).pop();
+          await tester.pumpAndSettle();
+          await tester.tap(find.byTooltip('Reading settings'));
+          await tester.pumpAndSettle();
 
-    testWidgets('compact settings rebuild and preserve sequential edits', (
-      tester,
-    ) async {
-      final engine = _UiReaderEngine();
-      final controller = controllerFor([engine]);
-      addTearDown(controller.dispose);
-      await pumpReader(
-        tester,
-        document: document('Reactive settings'),
-        controller: controller,
+          expect(find.byType(BottomSheet), findsOneWidget);
+          expect(find.text('Reading mode'), findsOneWidget);
+        },
       );
-      await tester.pumpAndSettle();
+    }
 
-      await tester.tap(find.byTooltip('Reading settings'));
-      await tester.pumpAndSettle();
+    for (final host in [false, true]) {
+      testWidgets(
+        'compact settings rebuild and preserve sequential edits (host: $host)',
+        (tester) async {
+          final engine = _UiReaderEngine();
+          final controller = controllerFor([engine]);
+          addTearDown(controller.dispose);
+          await pumpReader(
+            tester,
+            document: document('Reactive settings'),
+            controller: controller,
+            builders: ReaderUiBuilders(
+              compactPanelRoute: host ? hostPanelRoute : null,
+            ),
+          );
+          await tester.pumpAndSettle();
 
-      Slider fontSlider() => tester
-          .widgetList<Slider>(find.byType(Slider))
-          .singleWhere((slider) => slider.max == 72);
-      Slider lineHeightSlider() => tester
-          .widgetList<Slider>(find.byType(Slider))
-          .singleWhere((slider) => slider.max == 2.5);
+          await tester.tap(find.byTooltip('Reading settings'));
+          await tester.pumpAndSettle();
 
-      fontSlider().onChanged!(26);
-      fontSlider().onChangeEnd!(26);
-      await tester.pump();
+          Slider fontSlider() => tester
+              .widgetList<Slider>(find.byType(Slider))
+              .singleWhere((slider) => slider.max == 72);
+          Slider lineHeightSlider() => tester
+              .widgetList<Slider>(find.byType(Slider))
+              .singleWhere((slider) => slider.max == 2.5);
 
-      expect(fontSlider().value, 26);
-      expect(controller.snapshot.preferences.fontSize, 26);
+          fontSlider().onChanged!(26);
+          fontSlider().onChangeEnd!(26);
+          await tester.pump();
 
-      lineHeightSlider().onChanged!(2);
-      lineHeightSlider().onChangeEnd!(2);
-      await tester.pump();
+          expect(fontSlider().value, 26);
+          expect(controller.snapshot.preferences.fontSize, 26);
 
-      expect(lineHeightSlider().value, 2);
-      expect(controller.snapshot.preferences.fontSize, 26);
-      expect(controller.snapshot.preferences.lineHeight, 2);
-    });
+          lineHeightSlider().onChanged!(2);
+          lineHeightSlider().onChangeEnd!(2);
+          await tester.pump();
+
+          expect(lineHeightSlider().value, 2);
+          expect(controller.snapshot.preferences.fontSize, 26);
+          expect(controller.snapshot.preferences.lineHeight, 2);
+        },
+      );
+    }
 
     testWidgets(
       'settings sliders preview locally and commit once on change end',
@@ -744,82 +819,100 @@ void main() {
       },
     );
 
-    testWidgets('compact sheet closes before controller and document swap', (
-      tester,
-    ) async {
-      tester.view.physicalSize = const Size(600, 800);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      final firstEngine = _UiReaderEngine();
-      final secondEngine = _UiReaderEngine();
-      final firstController = controllerFor([firstEngine]);
-      final secondController = controllerFor([secondEngine]);
-      addTearDown(firstController.dispose);
-      addTearDown(secondController.dispose);
+    for (final host in [false, true]) {
+      testWidgets(
+        'compact sheet closes before controller and document swap (host: $host)',
+        (tester) async {
+          tester.view.physicalSize = const Size(600, 800);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          final firstEngine = _UiReaderEngine();
+          final secondEngine = _UiReaderEngine();
+          final firstController = controllerFor([firstEngine]);
+          final secondController = controllerFor([secondEngine]);
+          addTearDown(firstController.dispose);
+          addTearDown(secondController.dispose);
 
-      Widget app(ReaderDocument selected, ReaderController controller) {
-        return MaterialApp(
-          home: PapyrusReader(document: selected, controller: controller),
-        );
-      }
+          Widget app(ReaderDocument selected, ReaderController controller) {
+            return MaterialApp(
+              home: PapyrusReader(
+                document: selected,
+                controller: controller,
+                builders: ReaderUiBuilders(
+                  compactPanelRoute: host ? hostPanelRoute : null,
+                ),
+              ),
+            );
+          }
 
-      await tester.pumpWidget(app(document('First sheet'), firstController));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Reading settings'));
-      await tester.pumpAndSettle();
-      expect(find.byType(BottomSheet), findsOneWidget);
+          await tester.pumpWidget(
+            app(document('First sheet'), firstController),
+          );
+          await tester.pumpAndSettle();
+          await tester.tap(find.byTooltip('Reading settings'));
+          await tester.pumpAndSettle();
+          expect(find.byType(BottomSheet), findsOneWidget);
 
-      await tester.pumpWidget(app(document('Second sheet'), secondController));
-      await tester.pumpAndSettle();
+          await tester.pumpWidget(
+            app(document('Second sheet'), secondController),
+          );
+          await tester.pumpAndSettle();
 
-      expect(find.byType(BottomSheet), findsNothing);
-      expect(find.text('The Second sheet Reader'), findsOneWidget);
-      expect(secondController.snapshot.status, ReaderStatus.ready);
-      expect(firstEngine.isDisposed, isFalse);
-    });
-
-    testWidgets('pending compact sheets are removed on immediate unmount', (
-      tester,
-    ) async {
-      tester.view.physicalSize = const Size(600, 800);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      final engine = _UiReaderEngine();
-      final controller = controllerFor([engine]);
-      late StateSetter updateHost;
-      var showReader = true;
-      addTearDown(controller.dispose);
-      await tester.pumpWidget(
-        MaterialApp(
-          home: StatefulBuilder(
-            builder: (context, setState) {
-              updateHost = setState;
-              return showReader
-                  ? PapyrusReader(
-                      document: document('Pending sheet'),
-                      controller: controller,
-                    )
-                  : const SizedBox(key: ValueKey('reader-removed'));
-            },
-          ),
-        ),
+          expect(find.byType(BottomSheet), findsNothing);
+          expect(find.text('The Second sheet Reader'), findsNothing);
+          expect(find.byTooltip('Reading settings'), findsOneWidget);
+          expect(secondController.snapshot.status, ReaderStatus.ready);
+          expect(firstEngine.isDisposed, isFalse);
+        },
       );
-      await tester.pumpAndSettle();
+    }
 
-      await tester.tap(find.byTooltip('Reading settings'));
-      updateHost(() => showReader = false);
-      await tester.pumpAndSettle();
+    for (final host in [false, true]) {
+      testWidgets(
+        'pending compact sheets are removed on immediate unmount (host: $host)',
+        (tester) async {
+          tester.view.physicalSize = const Size(600, 800);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          final engine = _UiReaderEngine();
+          final controller = controllerFor([engine]);
+          late StateSetter updateHost;
+          var showReader = true;
+          addTearDown(controller.dispose);
+          await tester.pumpWidget(
+            MaterialApp(
+              home: StatefulBuilder(
+                builder: (context, setState) {
+                  updateHost = setState;
+                  return showReader
+                      ? PapyrusReader(
+                          document: document('Pending sheet'),
+                          controller: controller,
+                          builders: ReaderUiBuilders(
+                            compactPanelRoute: host ? hostPanelRoute : null,
+                          ),
+                        )
+                      : const SizedBox(key: ValueKey('reader-removed'));
+                },
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
 
-      expect(find.byKey(const ValueKey('reader-removed')), findsOneWidget);
-      expect(find.byType(BottomSheet), findsNothing);
-      expect(tester.takeException(), isNull);
-    });
+          await tester.tap(find.byTooltip('Reading settings'));
+          updateHost(() => showReader = false);
+          await tester.pumpAndSettle();
 
-    testWidgets('wide chrome uses the full viewport until a panel is opened', (
-      tester,
-    ) async {
+          expect(find.byKey(const ValueKey('reader-removed')), findsOneWidget);
+          expect(find.byType(BottomSheet), findsNothing);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+
+    testWidgets('wide panels overlay the unchanged viewport', (tester) async {
       final engine = _UiReaderEngine();
       final controller = controllerFor([engine]);
       addTearDown(controller.dispose);
@@ -844,7 +937,7 @@ void main() {
       expect(find.byType(BottomSheet), findsNothing);
       expect(find.byKey(const ValueKey('reader-side-panel')), findsOneWidget);
       expect(find.text('Chapter one'), findsOneWidget);
-      expect(viewportAfter.width, lessThan(viewportBefore.width));
+      expect(viewportAfter.width, viewportBefore.width);
       expect(viewportAfter.height, viewportBefore.height);
 
       await tester.tap(find.byTooltip('Reading settings'));
@@ -934,7 +1027,7 @@ void main() {
     });
 
     testWidgets(
-      'navigation commands serialize and expose disabled busy controls',
+      'navigation commands serialize without flashing or disabling controls',
       (tester) async {
         final firstGate = Completer<void>();
         final secondGate = Completer<void>();
@@ -956,6 +1049,11 @@ void main() {
         expect(engine.navigationEvents, ['next-start-0']);
         expect(
           find.byKey(const ValueKey('reader-command-progress')),
+          findsNothing,
+        );
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(
+          find.byKey(const ValueKey('reader-command-progress')),
           findsOneWidget,
         );
         final nextButton = tester.widget<IconButton>(
@@ -964,7 +1062,7 @@ void main() {
             matching: find.byType(IconButton),
           ),
         );
-        expect(nextButton.onPressed, isNull);
+        expect(nextButton.onPressed, isNotNull);
 
         firstGate.complete();
         await tester.pump();
@@ -1312,7 +1410,8 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(controller.snapshot.document!.id, 'Second');
-        expect(find.text('The Second Reader'), findsOneWidget);
+        expect(find.text('The Second Reader'), findsNothing);
+        expect(find.byTooltip('Reading settings'), findsOneWidget);
         expect(firstEngine.isDisposed, isTrue);
       },
     );
@@ -1343,7 +1442,7 @@ void main() {
             )
             .first,
       );
-      expect(material.color, isNot(Colors.white));
+      expect(material.color, controller.snapshot.preferences.backgroundColor);
       expect(exception, isNull);
       expect(
         find.byWidgetPredicate(
@@ -1399,7 +1498,6 @@ final class _UiReaderEngine extends ReaderEngine {
     ReaderTocEntry(
       title: 'Chapter one',
       locator: EpubReaderLocator(
-        cfi: 'epubcfi(/6/2!/4/1:0)',
         spineIndex: 0,
         localProgression: 0,
         totalProgression: 0,
@@ -1408,7 +1506,6 @@ final class _UiReaderEngine extends ReaderEngine {
         ReaderTocEntry(
           title: 'A nested section',
           locator: EpubReaderLocator(
-            cfi: 'epubcfi(/6/2!/4/2:0)',
             spineIndex: 0,
             localProgression: 0.2,
             totalProgression: 0.1,
@@ -1459,7 +1556,6 @@ final class _UiReaderEngine extends ReaderEngine {
       locator:
           initialLocator ??
           EpubReaderLocator(
-            cfi: 'epubcfi(/6/2!/4/1:0)',
             spineIndex: 0,
             localProgression: 0,
             totalProgression: 0,
@@ -1480,7 +1576,6 @@ final class _UiReaderEngine extends ReaderEngine {
     goToProgressCalls.add(progress);
     _publishLocator(
       EpubReaderLocator(
-        cfi: 'epubcfi(/6/2!/4/1:${(progress * 100).round()})',
         spineIndex: 0,
         localProgression: progress,
         totalProgression: progress,
@@ -1574,4 +1669,11 @@ final class _SnapshotViewportState extends State<_SnapshotViewport> {
   @override
   Widget build(BuildContext context) =>
       Text('Custom position ${(widget.progression * 100).toStringAsFixed(0)}');
+}
+
+Future<void> toggleReaderControls(WidgetTester tester) async {
+  await tester.tapAt(
+    tester.getRect(find.byKey(const ValueKey('reader-content'))).center,
+  );
+  await tester.pump(const Duration(milliseconds: 350));
 }

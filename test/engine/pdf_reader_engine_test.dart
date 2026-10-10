@@ -289,7 +289,6 @@ void main() {
       await expectLater(
         engine.goTo(
           EpubReaderLocator(
-            cfi: 'epubcfi(/6/2)',
             spineIndex: 0,
             localProgression: 0,
             totalProgression: 0,

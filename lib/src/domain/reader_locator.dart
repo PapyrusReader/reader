@@ -23,16 +23,12 @@ sealed class ReaderLocator {
 
 final class EpubReaderLocator extends ReaderLocator {
   factory EpubReaderLocator({
-    required String cfi,
     required int spineIndex,
     required double localProgression,
     required double totalProgression,
     int? textOffset,
     String? anchor,
   }) {
-    if (cfi.trim().isEmpty) {
-      throw ArgumentError.value(cfi, 'cfi', 'must not be empty');
-    }
     if (spineIndex < 0) {
       throw ArgumentError.value(
         spineIndex,
@@ -51,7 +47,6 @@ final class EpubReaderLocator extends ReaderLocator {
     }
 
     return EpubReaderLocator._(
-      cfi: cfi,
       spineIndex: spineIndex,
       localProgression: localProgression,
       totalProgression: totalProgression,
@@ -61,7 +56,6 @@ final class EpubReaderLocator extends ReaderLocator {
   }
 
   const EpubReaderLocator._({
-    required this.cfi,
     required this.spineIndex,
     required this.localProgression,
     required this.totalProgression,
@@ -70,12 +64,8 @@ final class EpubReaderLocator extends ReaderLocator {
   });
 
   factory EpubReaderLocator._fromJson(Map<String, Object?> json) {
-    final cfi = json['cfi'];
     final spineIndex = json['spineIndex'];
 
-    if (cfi is! String || cfi.trim().isEmpty) {
-      throw const FormatException('EPUB locator CFI must not be empty.');
-    }
     if (spineIndex is! int || spineIndex < 0) {
       throw const FormatException(
         'EPUB locator spineIndex must be a non-negative integer.',
@@ -93,7 +83,6 @@ final class EpubReaderLocator extends ReaderLocator {
     }
 
     return EpubReaderLocator._(
-      cfi: cfi,
       spineIndex: spineIndex,
       localProgression: _readProgression(json, 'localProgression'),
       totalProgression: _readProgression(json, 'totalProgression'),
@@ -102,7 +91,6 @@ final class EpubReaderLocator extends ReaderLocator {
     );
   }
 
-  final String cfi;
   final int spineIndex;
   final double localProgression;
   final double totalProgression;
@@ -111,7 +99,7 @@ final class EpubReaderLocator extends ReaderLocator {
 
   @override
   Map<String, Object?> toJson() {
-    if (cfi.isEmpty || spineIndex < 0) {
+    if (spineIndex < 0) {
       throw const FormatException('Cannot serialize an invalid EPUB locator.');
     }
     _validateProgression(localProgression, 'localProgression');
@@ -120,7 +108,6 @@ final class EpubReaderLocator extends ReaderLocator {
     return {
       'version': ReaderLocator.currentVersion,
       'type': 'epub',
-      'cfi': cfi,
       'spineIndex': spineIndex,
       'localProgression': localProgression,
       'totalProgression': totalProgression,
@@ -133,7 +120,6 @@ final class EpubReaderLocator extends ReaderLocator {
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is EpubReaderLocator &&
-          cfi == other.cfi &&
           spineIndex == other.spineIndex &&
           localProgression == other.localProgression &&
           textOffset == other.textOffset &&
@@ -142,7 +128,6 @@ final class EpubReaderLocator extends ReaderLocator {
 
   @override
   int get hashCode => Object.hash(
-    cfi,
     spineIndex,
     localProgression,
     totalProgression,

@@ -11,11 +11,13 @@ final class ReaderCommandError extends StatelessWidget {
     required this.message,
     required this.theme,
     required this.onDismiss,
+    this.onRetry,
   });
 
   final String message;
   final ReaderThemeData theme;
   final VoidCallback onDismiss;
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -38,6 +40,8 @@ final class ReaderCommandError extends StatelessWidget {
                 ),
               ),
             ),
+            if (onRetry != null)
+              TextButton(onPressed: onRetry, child: const Text('Try again')),
             IconButton(
               tooltip: 'Dismiss reader error',
               onPressed: onDismiss,
@@ -88,59 +92,35 @@ final class ReaderToolbar extends StatelessWidget {
   Widget build(BuildContext context) {
     final height = readerToolbarHeight(context, theme, isWide);
 
-    return Container(
+    return SizedBox(
       height: height,
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      color: theme.chromeColor,
-      child: IconTheme(
-        data: IconThemeData(color: theme.onChromeColor),
-        child: DefaultTextStyle.merge(
-          style: TextStyle(color: theme.onChromeColor),
-          child: Row(
-            children: [
-              if (onBack != null)
-                ReaderIconButton(
-                  icon: Icons.arrow_back_rounded,
-                  tooltip: 'Back',
-                  onPressed: onBack!,
-                  theme: theme,
-                ),
-              const SizedBox(width: 4),
-              Expanded(
-                child: Text(
-                  document.title?.trim().isNotEmpty == true
-                      ? document.title!.trim()
-                      : 'Reader',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    color: theme.onChromeColor,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              ReaderIconButton(
-                key: const ValueKey('reader-toc-button'),
-                focusNode: tocFocusNode,
-                icon: Icons.format_list_bulleted_rounded,
-                tooltip: 'Table of contents',
-                onPressed: onTableOfContents,
-                theme: theme,
-              ),
-              ReaderIconButton(
-                key: const ValueKey('reader-settings-button'),
-                focusNode: settingsFocusNode,
-                icon: Icons.text_fields_rounded,
-                tooltip: 'Reading settings',
-                onPressed: onSettings,
-                theme: theme,
-              ),
-              // The controls toggle stays mounted in the shell overlay during
-              // reflow, preserving browser accessibility and keyboard focus.
-              SizedBox(width: theme.minimumTargetSize),
-            ],
+      child: AppBar(
+        primary: false,
+        automaticallyImplyLeading: false,
+        toolbarHeight: height,
+        backgroundColor: theme.chromeColor,
+        foregroundColor: theme.onChromeColor,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        leading: onBack == null ? null : BackButton(onPressed: onBack),
+        actions: [
+          ReaderIconButton(
+            key: const ValueKey('reader-toc-button'),
+            focusNode: tocFocusNode,
+            icon: Icons.format_list_bulleted_rounded,
+            tooltip: 'Table of contents',
+            onPressed: onTableOfContents,
+            theme: theme,
           ),
-        ),
+          ReaderIconButton(
+            key: const ValueKey('reader-settings-button'),
+            focusNode: settingsFocusNode,
+            icon: Icons.text_fields_rounded,
+            tooltip: 'Reading settings',
+            onPressed: onSettings,
+            theme: theme,
+          ),
+        ],
       ),
     );
   }
@@ -204,6 +184,51 @@ final class ReaderProgressControls extends StatelessWidget {
     final normalized = progress.clamp(0.0, 1.0);
     final percent = (normalized * 100).round();
 
+    final controls = Row(
+      children: [
+        ReaderIconButton(
+          icon: Icons.chevron_left_rounded,
+          tooltip: 'Previous',
+          onPressed: enabled ? onPrevious : null,
+          theme: theme,
+        ),
+        Expanded(
+          child: Semantics(
+            label: 'Reading progress',
+            value: '$percent percent',
+            slider: true,
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                activeTrackColor: theme.progressColor,
+                thumbColor: theme.handleColor,
+              ),
+              child: Slider(
+                value: normalized,
+                onChanged: enabled ? onProgressChanged : null,
+                onChangeEnd: enabled ? onProgressChangeEnd : null,
+              ),
+            ),
+          ),
+        ),
+        SizedBox(
+          width: 64,
+          child: Text(
+            '$percent%',
+            key: const ValueKey('reader-progress-label'),
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            semanticsLabel: '$percent percent read',
+          ),
+        ),
+        ReaderIconButton(
+          icon: Icons.chevron_right_rounded,
+          tooltip: 'Next',
+          onPressed: enabled ? onNext : null,
+          theme: theme,
+        ),
+      ],
+    );
+
     return ColoredBox(
       color: theme.chromeColor,
       child: IconTheme(
@@ -212,64 +237,35 @@ final class ReaderProgressControls extends StatelessWidget {
           style: TextStyle(color: theme.onChromeColor),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (locationLabel != null)
-                  Text(
-                    locationLabel!,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      color: theme.onChromeColor,
-                    ),
+            child: locationLabel == null
+                ? controls
+                : Stack(
+                    children: [
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            locationLabel!,
+                            textAlign: TextAlign.center,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.labelMedium
+                                ?.copyWith(color: theme.onChromeColor),
+                          ),
+                          // Keep the label 11 pixels above the track while the
+                          // controls retain their full-height touch targets.
+                          SizedBox(height: theme.minimumTargetSize / 2 + 11),
+                        ],
+                      ),
+                      PositionedDirectional(
+                        start: 0,
+                        end: 0,
+                        bottom: 0,
+                        child: controls,
+                      ),
+                    ],
                   ),
-                Row(
-                  children: [
-                    ReaderIconButton(
-                      icon: Icons.chevron_left_rounded,
-                      tooltip: 'Previous',
-                      onPressed: enabled ? onPrevious : null,
-                      theme: theme,
-                    ),
-                    Expanded(
-                      child: Semantics(
-                        label: 'Reading progress',
-                        value: '$percent percent',
-                        slider: true,
-                        child: SliderTheme(
-                          data: SliderTheme.of(context).copyWith(
-                            activeTrackColor: theme.progressColor,
-                            thumbColor: theme.handleColor,
-                          ),
-                          child: Slider(
-                            value: normalized,
-                            onChanged: enabled ? onProgressChanged : null,
-                            onChangeEnd: enabled ? onProgressChangeEnd : null,
-                          ),
-                        ),
-                      ),
-                    ),
-                    SizedBox(
-                      width: 64,
-                      child: Text(
-                        '$percent%',
-                        key: const ValueKey('reader-progress-label'),
-                        textAlign: TextAlign.center,
-                        maxLines: 1,
-                        semanticsLabel: '$percent percent read',
-                      ),
-                    ),
-                    ReaderIconButton(
-                      icon: Icons.chevron_right_rounded,
-                      tooltip: 'Next',
-                      onPressed: enabled ? onNext : null,
-                      theme: theme,
-                    ),
-                  ],
-                ),
-              ],
-            ),
           ),
         ),
       ),

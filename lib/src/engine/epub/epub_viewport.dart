@@ -2,8 +2,11 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 
 import '../../domain/reader_types.dart';
+import '../../domain/reader_preferences.dart';
+import '../../presentation/reader_interaction_scope.dart';
 import 'epub_reader_engine.dart';
 import 'epub_rich_layout.dart';
 import 'epub_content_renderer.dart';
@@ -16,12 +19,23 @@ final class EpubViewport extends StatefulWidget {
 }
 
 final class _EpubViewportState extends State<EpubViewport> {
-  final PageController _pagesController = PageController();
-  final ScrollController _scrollController = ScrollController();
+  PageController _pagesController = PageController();
+  ScrollController _scrollController = ScrollController();
   Future<List<EpubRichPage>>? _layout;
   List<EpubRichPage> _pages = const [];
   Object? _layoutKey;
-  int _layoutGeneration = 0;
+  Object? _geometryKey;
+  Size _contentSize = Size.zero;
+  TextScaler _scaler = TextScaler.noScaling;
+  TextDirection _direction = TextDirection.ltr;
+  int _fontRevision = 0;
+  final Map<Object, List<EpubRichPage>> _layoutCache = {};
+  Timer? _prefetchTimer;
+  int _prefetchGeneration = 0;
+  ReaderPreferences? _displayPreferences;
+  int _displayColumns = 1;
+  Timer? _loadingTimer;
+  bool _showLoading = false;
   int _restoration = -1;
   int _pageIndex = 0;
   int _columns = 1;
@@ -38,13 +52,17 @@ final class _EpubViewportState extends State<EpubViewport> {
     super.initState();
     widget.engine.addListener(_changed);
     widget.engine.moveWithinChapter = _move;
+    widget.engine.prepareChapter = _prepareChapter;
     _scrollController.addListener(_scrollChanged);
     PaintingBinding.instance.systemFonts.addListener(_fontsChanged);
   }
 
   void _fontsChanged() {
     if (!mounted) return;
-    setState(() => _layoutKey = null);
+    setState(() {
+      _fontRevision++;
+      _layoutKey = null;
+    });
   }
 
   @override
@@ -53,14 +71,18 @@ final class _EpubViewportState extends State<EpubViewport> {
     if (oldWidget.engine != widget.engine) {
       oldWidget.engine.removeListener(_changed);
       oldWidget.engine.moveWithinChapter = null;
+      oldWidget.engine.prepareChapter = null;
+      _layoutCache.clear();
+      _pages = const [];
       widget.engine.addListener(_changed);
       widget.engine.moveWithinChapter = _move;
+      widget.engine.prepareChapter = _prepareChapter;
       _layoutKey = null;
     }
   }
 
   void _changed() {
-    if (mounted && _restoration != widget.engine.restorationRevision) {
+    if (mounted) {
       setState(() {});
     }
   }
@@ -85,7 +107,49 @@ final class _EpubViewportState extends State<EpubViewport> {
     if (_restoration == widget.engine.restorationRevision) return;
     _restoration = widget.engine.restorationRevision;
     final target = _target(pages);
+    _restoring = true;
     _pageIndex = target ~/ _columns;
+    if (widget.engine.preferences.layoutMode == ReaderLayoutMode.paginated) {
+      final previous = _pagesController;
+      _pagesController = PageController(
+        initialPage: _pageIndex,
+        keepPage: false,
+      );
+      WidgetsBinding.instance.addPostFrameCallback((_) => previous.dispose());
+    } else {
+      final preferences = widget.engine.preferences;
+      final heights = [
+        for (final page in pages) _pageHeight(page, preferences),
+      ];
+      final extent = math.max(
+        0.0,
+        heights.fold<double>(0, (total, height) => total + height) -
+            _contentSize.height -
+            preferences.pageMargins.vertical,
+      );
+      final offset = widget.engine.locator.textOffset;
+      var pixels = extent * widget.engine.locator.localProgression;
+      if (offset != null) {
+        pixels = heights
+            .take(target)
+            .fold<double>(0, (total, height) => total + height);
+        pixels += preferences.pageMargins.top;
+        for (final fragment in pages[target].fragments) {
+          if (fragment.offset >= offset ||
+              fragment.block.offset + fragment.end > offset) {
+            break;
+          }
+          pixels += fragment.height + fragment.spacing(preferences);
+        }
+      }
+      final previous = _scrollController;
+      previous.removeListener(_scrollChanged);
+      _scrollController = ScrollController(
+        initialScrollOffset: pixels.clamp(0, extent),
+        keepScrollOffset: false,
+      )..addListener(_scrollChanged);
+      WidgetsBinding.instance.addPostFrameCallback((_) => previous.dispose());
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !identical(_pages, pages)) return;
       _restoring = true;
@@ -117,13 +181,18 @@ final class _EpubViewportState extends State<EpubViewport> {
       }
       _restoring = false;
       _busy = false;
+      _loadingTimer?.cancel();
+      _showLoading = false;
       if (_layoutReady?.isCompleted == false) _layoutReady!.complete();
-      widget.engine.viewportPaginationChanged(pages.length, target + 1);
       if (widget.engine.preferences.layoutMode == ReaderLayoutMode.paginated) {
-        _publishCoverage(_pageIndex * _columns);
+        _publishPage(
+          _pageIndex,
+          restoredOffset: widget.engine.locator.textOffset,
+        );
       } else {
         _scrollChanged();
       }
+      _schedulePrefetch();
     });
   }
 
@@ -155,23 +224,22 @@ final class _EpubViewportState extends State<EpubViewport> {
     return true;
   }
 
-  void _publishPage(int index) {
-    if (_restoring || _pages.isEmpty) return;
+  void _publishPage(int index, {int? restoredOffset}) {
+    if (_restoring || _busy || _pages.isEmpty) {
+      return;
+    }
+
     _pageIndex = index;
     final page = (index * _columns).clamp(0, _pages.length - 1);
-    widget.engine.viewportPositionChanged(
-      _pages.length <= _columns ? 0 : page / (_pages.length - _columns),
-      textOffset: _pages[page].offset,
-      pageNumber: page + 1,
-    );
-    _publishCoverage(page);
-  }
-
-  void _publishCoverage(int page) {
     final after = math.min(page + _columns, _pages.length);
-    widget.engine.viewportCoverageChanged(
-      _pages[page].offset,
-      after < _pages.length
+    final spreads = (_pages.length / _columns).ceil();
+    widget.engine.viewportChanged(
+      spreads <= 1 ? 0 : index / (spreads - 1),
+      textOffset: restoredOffset ?? _pages[page].offset,
+      pageNumber: page + 1,
+      pageCount: _pages.length,
+      coverageStart: _pages[page].offset,
+      coverageEnd: after < _pages.length
           ? _pages[after].offset
           : widget.engine.contentLength,
       atEnd: after == _pages.length,
@@ -179,7 +247,12 @@ final class _EpubViewportState extends State<EpubViewport> {
   }
 
   void _scrollChanged() {
-    if (_restoring || !_scrollController.hasClients || _pages.isEmpty) return;
+    if (_restoring ||
+        _busy ||
+        !_scrollController.hasClients ||
+        _pages.isEmpty) {
+      return;
+    }
     final pixels = _scrollController.position.pixels;
     var index = 0;
     for (var i = 1; i < _scrollOffsets.length; i++) {
@@ -197,11 +270,6 @@ final class _EpubViewportState extends State<EpubViewport> {
       within -= fragment.height + fragment.spacing(widget.engine.preferences);
     }
     final max = _scrollController.position.maxScrollExtent;
-    widget.engine.viewportPositionChanged(
-      max <= 0 ? 0 : (pixels / max).clamp(0, 1),
-      textOffset: offset,
-      pageNumber: index + 1,
-    );
     final bottom = pixels + _scrollController.position.viewportDimension;
     var lastOffset = offset;
     for (var i = index; i < _pages.length && _scrollOffsets[i] < bottom; i++) {
@@ -212,14 +280,25 @@ final class _EpubViewportState extends State<EpubViewport> {
         top += fragment.height + fragment.spacing(widget.engine.preferences);
       }
     }
-    widget.engine.viewportCoverageChanged(
-      offset,
-      lastOffset.clamp(0, widget.engine.contentLength),
+    widget.engine.viewportChanged(
+      max <= 0 ? 0 : (pixels / max).clamp(0, 1),
+      textOffset: offset,
+      pageNumber: index + 1,
+      pageCount: _pages.length,
+      coverageStart: offset,
+      coverageEnd: lastOffset.clamp(0, widget.engine.contentLength),
       atEnd: pixels >= max - 1,
     );
   }
 
   void _beyondChapter(int direction) {
+    final request = ReaderInteractionScope.maybeOf(context)?.onTurn;
+
+    if (request != null) {
+      request(direction);
+      return;
+    }
+
     unawaited(
       (direction > 0 ? widget.engine.goNext() : widget.engine.goPrevious())
           .catchError((Object error, StackTrace stack) {
@@ -234,13 +313,103 @@ final class _EpubViewportState extends State<EpubViewport> {
     );
   }
 
+  Future<List<EpubRichPage>> _measure(
+    int index,
+    List<EpubContentBlock> blocks, {
+    int? prefetch,
+  }) async {
+    final geometry = _geometryKey;
+    final key = (index, geometry);
+    final cached = _layoutCache[key];
+
+    if (cached != null) {
+      return cached;
+    }
+
+    bool cancelled() =>
+        !mounted ||
+        geometry != _geometryKey ||
+        (prefetch != null && prefetch != _prefetchGeneration);
+    final pages = await layoutEpubChapter(
+      blocks,
+      contentSize: _contentSize,
+      preferences: widget.engine.preferences,
+      textScaler: _scaler,
+      direction: _direction,
+      cancelled: cancelled,
+    );
+
+    if (!cancelled() && pages.isNotEmpty) {
+      _layoutCache[key] = pages;
+
+      while (_layoutCache.length > 3) {
+        _layoutCache.remove(_layoutCache.keys.first);
+      }
+    }
+
+    return pages;
+  }
+
+  Future<void> _prepareChapter(int index, List<EpubContentBlock> blocks) async {
+    if (widget.engine.renderer != null &&
+        widget.engine.preferences.layoutMode == ReaderLayoutMode.scroll) {
+      return;
+    }
+
+    _prefetchGeneration++;
+    _prefetchTimer?.cancel();
+
+    // A resize can supersede measurement while navigation is waiting.
+    Object? geometry;
+    do {
+      geometry = _geometryKey;
+      await _measure(index, blocks);
+    } while (mounted && geometry != _geometryKey);
+  }
+
+  void _schedulePrefetch() {
+    _prefetchTimer?.cancel();
+    final generation = ++_prefetchGeneration;
+    final index = widget.engine.locator.spineIndex;
+    _prefetchTimer = Timer(const Duration(milliseconds: 150), () async {
+      for (final neighbor in [index + 1, index - 1]) {
+        if (!mounted || generation != _prefetchGeneration) {
+          return;
+        }
+
+        if (neighbor < 0 || neighbor >= widget.engine.chapterCount) {
+          continue;
+        }
+
+        try {
+          final chapter = await widget.engine.chapterContent(neighbor);
+
+          if (!mounted || generation != _prefetchGeneration) {
+            return;
+          }
+
+          await _measure(neighbor, [
+            for (final block in chapter['blocks'] as List)
+              EpubContentBlock(Map<String, Object?>.from(block as Map)),
+          ], prefetch: generation);
+        } catch (_) {
+          // Speculative work must not interrupt the readable current page.
+          // Requested navigation will surface a chapter error with retry.
+        }
+      }
+    });
+  }
+
   @override
   void dispose() {
-    _layoutGeneration++;
+    _prefetchGeneration++;
+    _prefetchTimer?.cancel();
+    _loadingTimer?.cancel();
     if (_layoutReady?.isCompleted == false) _layoutReady!.complete();
     widget.engine.removeListener(_changed);
     PaintingBinding.instance.systemFonts.removeListener(_fontsChanged);
     widget.engine.moveWithinChapter = null;
+    widget.engine.prepareChapter = null;
     _pagesController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -290,14 +459,33 @@ final class _EpubViewportState extends State<EpubViewport> {
             math.max(1, columnWidth - preferences.pageMargins.horizontal),
             math.max(1, size.height - preferences.pageMargins.vertical),
           );
-          final key = (
-            widget.engine.contentRevision,
+          final geometry = (
+            widget.engine.documentRevision,
             contentSize,
-            preferences,
+            preferences.fontFamily,
+            preferences.fontSize,
+            preferences.lineHeight,
+            preferences.letterSpacing,
+            preferences.paragraphSpacing,
+            preferences.pageMargins,
+            preferences.layoutMode,
             scaler,
             direction,
             _columns,
+            _fontRevision,
           );
+
+          if (_geometryKey != geometry) {
+            _geometryKey = geometry;
+            _contentSize = contentSize;
+            _scaler = scaler;
+            _direction = direction;
+            _layoutCache.clear();
+            _prefetchGeneration++;
+          }
+
+          final key = (widget.engine.locator.spineIndex, geometry);
+
           if (_layoutKey != key) {
             _layoutKey = key;
             WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -307,20 +495,27 @@ final class _EpubViewportState extends State<EpubViewport> {
             });
             _restoration = -1;
             _restoring = true;
-            final generation = ++_layoutGeneration;
             _busy = true;
-            if (_layoutReady?.isCompleted == false) _layoutReady!.complete();
+
+            if (_layoutReady?.isCompleted == false) {
+              _layoutReady!.complete();
+            }
+
             _layoutReady = Completer<void>();
-            _layout = Future<void>.delayed(Duration.zero).then(
-              (_) => layoutEpubChapter(
-                widget.engine.blocks,
-                contentSize: contentSize,
-                preferences: preferences,
-                textScaler: scaler,
-                direction: direction,
-                cancelled: () => !mounted || generation != _layoutGeneration,
-              ),
-            );
+            _loadingTimer?.cancel();
+            _showLoading = false;
+            _loadingTimer = Timer(const Duration(milliseconds: 300), () {
+              if (mounted && _busy) {
+                setState(() => _showLoading = true);
+              }
+            });
+            final cached = _layoutCache[key];
+            _layout = cached == null
+                ? _measure(
+                    widget.engine.locator.spineIndex,
+                    widget.engine.blocks,
+                  )
+                : SynchronousFuture(cached);
           }
           return Center(
             child: SizedBox(
@@ -328,7 +523,7 @@ final class _EpubViewportState extends State<EpubViewport> {
               child: FutureBuilder<List<EpubRichPage>>(
                 future: _layout,
                 builder: (context, snapshot) {
-                  if (snapshot.hasError) {
+                  if (snapshot.hasError && _pages.isEmpty) {
                     if (_layoutReady?.isCompleted == false) {
                       _layoutReady!.complete();
                     }
@@ -352,9 +547,12 @@ final class _EpubViewportState extends State<EpubViewport> {
                       ),
                     );
                   }
-                  if (snapshot.connectionState != ConnectionState.done ||
-                      !snapshot.hasData ||
-                      snapshot.data!.isEmpty) {
+                  final ready =
+                      snapshot.connectionState == ConnectionState.done &&
+                      snapshot.hasData &&
+                      snapshot.data!.isNotEmpty;
+
+                  if (!ready && _pages.isEmpty) {
                     return Center(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
@@ -373,12 +571,29 @@ final class _EpubViewportState extends State<EpubViewport> {
                       ),
                     );
                   }
-                  final pages = snapshot.data!;
-                  _restore(pages, width);
+                  if (ready) {
+                    _displayPreferences = preferences;
+                    _displayColumns = _columns;
+                    _restore(snapshot.data!, width);
+                  } else if (snapshot.hasError) {
+                    _busy = false;
+                    _loadingTimer?.cancel();
+                    if (_layoutReady?.isCompleted == false) {
+                      _layoutReady!.complete();
+                    }
+                  }
+
+                  final pages = ready ? snapshot.data! : _pages;
+                  final displayPreferences = ready
+                      ? preferences
+                      : _displayPreferences!;
+                  final columns = ready ? _columns : _displayColumns;
                   Widget content;
-                  if (preferences.layoutMode == ReaderLayoutMode.scroll) {
+                  if (displayPreferences.layoutMode ==
+                      ReaderLayoutMode.scroll) {
                     final heights = [
-                      for (final page in pages) _pageHeight(page),
+                      for (final page in pages)
+                        _pageHeight(page, displayPreferences),
                     ];
                     var cumulative = 0.0;
                     _scrollOffsets = [
@@ -390,26 +605,35 @@ final class _EpubViewportState extends State<EpubViewport> {
                         })(),
                     ];
                     content = ListView.custom(
+                      key: ValueKey(_scrollController),
                       controller: _scrollController,
                       itemExtentBuilder: (index, _) => heights[index],
                       childrenDelegate: _EpubScrollDelegate(
-                        (context, index) => _page(pages[index], scroll: true),
+                        (context, index) => _page(
+                          pages[index],
+                          displayPreferences,
+                          scroll: true,
+                        ),
                         childCount: pages.length,
                         extent: cumulative,
                       ),
                     );
                   } else {
                     content = PageView.builder(
+                      key: ValueKey(_pagesController),
                       controller: _pagesController,
                       onPageChanged: _publishPage,
-                      itemCount: (pages.length / _columns).ceil(),
+                      itemCount: (pages.length / columns).ceil(),
                       itemBuilder: (context, index) => Row(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          for (var column = 0; column < _columns; column++)
+                          for (var column = 0; column < columns; column++)
                             Expanded(
-                              child: index * _columns + column < pages.length
-                                  ? _page(pages[index * _columns + column])
+                              child: index * columns + column < pages.length
+                                  ? _page(
+                                      pages[index * columns + column],
+                                      displayPreferences,
+                                    )
                                   : const SizedBox.shrink(),
                             ),
                         ],
@@ -418,7 +642,7 @@ final class _EpubViewportState extends State<EpubViewport> {
                   }
                   // Pointer tracking does not claim the gesture arena from text
                   // selection, links or scrolling. Only a drag past a boundary turns.
-                  return Listener(
+                  final surface = Listener(
                     onPointerDown: (_) {
                       _drag = 0;
                       _startPage = _pageIndex;
@@ -427,12 +651,13 @@ final class _EpubViewportState extends State<EpubViewport> {
                           : 0;
                     },
                     onPointerMove: (event) => _drag +=
-                        preferences.layoutMode == ReaderLayoutMode.scroll
+                        displayPreferences.layoutMode == ReaderLayoutMode.scroll
                         ? event.delta.dy
                         : event.delta.dx,
                     onPointerUp: (_) {
                       if (_drag.abs() < 70) return;
-                      if (preferences.layoutMode == ReaderLayoutMode.scroll &&
+                      if (displayPreferences.layoutMode ==
+                              ReaderLayoutMode.scroll &&
                           _scrollController.hasClients) {
                         final p = _scrollController.position;
                         if (_drag < 0 &&
@@ -442,8 +667,7 @@ final class _EpubViewportState extends State<EpubViewport> {
                         if (_drag > 0 && _startScroll <= 1) _beyondChapter(-1);
                       } else {
                         if (_drag < 0 &&
-                            _startPage ==
-                                (pages.length / _columns).ceil() - 1) {
+                            _startPage == (pages.length / columns).ceil() - 1) {
                           _beyondChapter(1);
                         }
                         if (_drag > 0 && _startPage == 0) _beyondChapter(-1);
@@ -456,7 +680,41 @@ final class _EpubViewportState extends State<EpubViewport> {
                             ) ==
                             null
                         ? content
-                        : SelectionArea(child: content),
+                        : SelectionArea(
+                            onSelectionChanged: (selection) =>
+                                ReaderInteractionScope.maybeOf(
+                                  context,
+                                )?.onSelectionChanged(
+                                  selection?.plainText.isNotEmpty ?? false,
+                                ),
+                            child: content,
+                          ),
+                  );
+                  return Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      IgnorePointer(ignoring: !ready, child: surface),
+                      if (!ready && _showLoading && !snapshot.hasError)
+                        const PositionedDirectional(
+                          top: 8,
+                          end: 8,
+                          child: SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        ),
+                      if (snapshot.hasError)
+                        Align(
+                          alignment: Alignment.bottomCenter,
+                          child: FilledButton(
+                            onPressed: () => setState(() => _layoutKey = null),
+                            child: const Text(
+                              'Could not prepare pages. Try again',
+                            ),
+                          ),
+                        ),
+                    ],
                   );
                 },
               ),
@@ -467,16 +725,19 @@ final class _EpubViewportState extends State<EpubViewport> {
     );
   }
 
-  double _pageHeight(EpubRichPage page) =>
-      widget.engine.preferences.pageMargins.vertical +
+  double _pageHeight(EpubRichPage page, ReaderPreferences preferences) =>
+      preferences.pageMargins.vertical +
       page.fragments.fold<double>(
         0,
         (sum, fragment) =>
-            sum + fragment.height + fragment.spacing(widget.engine.preferences),
+            sum + fragment.height + fragment.spacing(preferences),
       );
 
-  Widget _page(EpubRichPage page, {bool scroll = false}) {
-    final preferences = widget.engine.preferences;
+  Widget _page(
+    EpubRichPage page,
+    ReaderPreferences preferences, {
+    bool scroll = false,
+  }) {
     final children = [
       for (final fragment in page.fragments)
         Padding(

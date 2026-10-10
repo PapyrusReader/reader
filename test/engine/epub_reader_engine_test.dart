@@ -83,7 +83,6 @@ void main() {
       final engine = testEpubEngine();
       final book = document(syntheticEpub());
       final restored = EpubReaderLocator(
-        cfi: 'epubcfi(/6/4!/4/1:0)',
         spineIndex: 1,
         localProgression: 0.2,
         totalProgression: 0.6,
@@ -94,7 +93,14 @@ void main() {
         initialLocator: restored,
         preferences: const ReaderPreferences(),
       );
-      expect(await engine.currentLocator(), restored);
+      final restoredPosition =
+          await engine.currentLocator() as EpubReaderLocator;
+      expect(restoredPosition.spineIndex, restored.spineIndex);
+      expect(restoredPosition.localProgression, restored.localProgression);
+      expect(
+        restoredPosition.totalProgression,
+        isNot(restored.totalProgression),
+      );
       expect(engine.currentChapterHtml, contains('Chapter Two'));
 
       await engine.goPrevious();
@@ -110,7 +116,6 @@ void main() {
 
       await engine.goTo(
         EpubReaderLocator(
-          cfi: 'epubcfi(/6/6!/4/1:0)',
           spineIndex: 2,
           localProgression: 0,
           totalProgression: 1,
@@ -151,8 +156,8 @@ void main() {
 
       final middle = await engine.currentLocator() as EpubReaderLocator;
       expect(middle.spineIndex, 1);
-      expect(middle.localProgression, 0.5);
-      expect(middle.totalProgression, 0.5);
+      expect(middle.textOffset, greaterThan(0));
+      expect(middle.totalProgression, closeTo(0.5, .01));
       expect(engine.currentChapterHtml, contains('Chapter Two'));
 
       await engine.goToProgress(1);
@@ -185,7 +190,6 @@ void main() {
         engine.load(
           document(syntheticEpub()),
           initialLocator: EpubReaderLocator(
-            cfi: 'epubcfi(/6/18!/4/1:0)',
             spineIndex: 8,
             localProgression: 0,
             totalProgression: 1,
@@ -297,7 +301,6 @@ void main() {
       final paginator = TrackingEpubPaginator();
       final engine = testEpubEngine(paginator: paginator);
       final restored = EpubReaderLocator(
-        cfi: 'epubcfi(/6/4!/4/1:0)',
         spineIndex: 1,
         localProgression: 0,
         totalProgression: 1 / 3,
@@ -336,7 +339,6 @@ void main() {
         final previousHtml = engine.currentChapterHtml;
         final previousClearCount = paginator.clearCount;
         final restored = EpubReaderLocator(
-          cfi: 'epubcfi(/6/4!/4/1:0)',
           spineIndex: 1,
           localProgression: 0,
           totalProgression: 1 / 3,
@@ -563,7 +565,6 @@ void main() {
     await tester.pumpAndSettle();
 
     final locator = await engine.currentLocator() as EpubReaderLocator;
-    expect(locator.cfi, startsWith('epubcfi('));
     expect(locator.localProgression, greaterThan(0));
   });
 
@@ -574,7 +575,6 @@ void main() {
       await engine.load(
         document(syntheticEpub(longChapter: true)),
         initialLocator: EpubReaderLocator(
-          cfi: 'epubcfi(/6/2!/4/1:0)',
           spineIndex: 0,
           localProgression: 0.5,
           totalProgression: 0.25,
@@ -608,7 +608,6 @@ void main() {
 
       await engine.goTo(
         EpubReaderLocator(
-          cfi: 'epubcfi(/6/2!/4/1:80)',
           spineIndex: 0,
           localProgression: 0.8,
           totalProgression: 0.4,
@@ -632,7 +631,6 @@ void main() {
       await engine.load(
         document(syntheticEpub(longChapter: true)),
         initialLocator: EpubReaderLocator(
-          cfi: 'epubcfi(/6/2!/4/1:0)',
           spineIndex: 0,
           localProgression: 0.5,
           totalProgression: 0.25,
@@ -711,7 +709,7 @@ void main() {
           layoutMode: ReaderLayoutMode.scroll,
         ),
       );
-      await engine.goNext();
+      await pumpReaderCommand(tester, engine.goNext());
 
       Widget viewport() {
         return Directionality(
@@ -732,13 +730,14 @@ void main() {
       var locator = await engine.currentLocator() as EpubReaderLocator;
       expect(locator.spineIndex, 1);
       expect(locator.localProgression, closeTo(1, 0.001));
-      expect(locator.totalProgression, closeTo(2 / 3, 0.001));
+      final previousProgress = locator.totalProgression;
 
-      await engine.goNext();
+      await pumpReaderCommand(tester, engine.goNext());
       locator = await engine.currentLocator() as EpubReaderLocator;
       expect(locator.spineIndex, 2);
       expect(locator.localProgression, 0);
-      expect(locator.totalProgression, closeTo(2 / 3, 0.001));
+      expect(locator.totalProgression, greaterThanOrEqualTo(previousProgress));
+      expect(locator.totalProgression - previousProgress, lessThan(.1));
 
       await tester.pumpWidget(viewport());
       await tester.pumpAndSettle();

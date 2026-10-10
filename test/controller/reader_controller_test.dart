@@ -102,7 +102,6 @@ void main() {
 
     test('delegates loading to the matching engine', () async {
       final initialLocator = EpubReaderLocator(
-        cfi: 'epubcfi(/6/2!/4/1:0)',
         spineIndex: 0,
         localProgression: 0,
         totalProgression: 0,
@@ -120,7 +119,6 @@ void main() {
     test('mirrors engine state and emits locator changes once', () async {
       await controller.load(document);
       final locator = EpubReaderLocator(
-        cfi: 'epubcfi(/6/6!/4/1:4)',
         spineIndex: 2,
         localProgression: 0.4,
         totalProgression: 0.5,
@@ -140,13 +138,11 @@ void main() {
       () async {
         await controller.load(document);
         final jump = EpubReaderLocator(
-          cfi: 'epubcfi(/6/4)',
           spineIndex: 1,
           localProgression: 0,
           totalProgression: .2,
         );
         final viewport = EpubReaderLocator(
-          cfi: 'epubcfi(/6/4)',
           spineIndex: 1,
           localProgression: .5,
           totalProgression: .3,
@@ -175,7 +171,6 @@ void main() {
     test('delegates navigation and current location', () async {
       await controller.load(document);
       final locator = EpubReaderLocator(
-        cfi: 'epubcfi(/6/4!/4/1:0)',
         spineIndex: 1,
         localProgression: 0.1,
         totalProgression: 0.2,
@@ -394,7 +389,6 @@ void main() {
       final load = controller.load(document);
       await started.future;
       final locator = EpubReaderLocator(
-        cfi: 'epubcfi(/6/2)',
         spineIndex: 0,
         localProgression: 0,
         totalProgression: 0,
@@ -427,7 +421,6 @@ void main() {
       engine.loadFailure = failure;
       await expectLater(controller.load(document), throwsA(same(failure)));
       final locator = EpubReaderLocator(
-        cfi: 'epubcfi(/6/2)',
         spineIndex: 0,
         localProgression: 0,
         totalProgression: 0,
@@ -520,7 +513,6 @@ void main() {
           onLocatorChanged: (_) => throw callbackFailure,
         );
         final locator = EpubReaderLocator(
-          cfi: 'epubcfi(/6/2)',
           spineIndex: 0,
           localProgression: 0,
           totalProgression: 0,

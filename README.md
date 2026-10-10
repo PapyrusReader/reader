@@ -46,12 +46,18 @@ provided `ReaderController` remains host-owned. With an external controller,
 omitted initial preferences remain controller-owned; an explicit value
 overrides them for the document load.
 
-Use **Hide controls** in the toolbar for distraction-free reading. Both bars
-collapse, expanding the page area without reopening the document. Page-turn
-keys, EPUB swipes and PDF scrolling remain available. The small **Show controls**
-button in the top corner or **Escape** restores the bars. This is temporary UI
-state; opening another document restores the controls. Custom toolbar builders
-can expose `ReaderToolbarContext.toggleControls`.
+Tap the reading surface or press **Escape** to hide or restore controls. The
+viewport stays the same size, so this does not repaginate or move the book.
+Page-turn keys, EPUB swipes and PDF scrolling remain available. Custom toolbar
+builders can expose `ReaderToolbarContext.toggleControls`.
+
+Hosts can supply `ReaderUiBuilders.compactPanelRoute` to put Contents and Reading
+settings inside their own sheet shell. The factory receives the panel title, kind,
+and a live `buildContent(context, scrollController)` builder without reader headers
+or framing. Return an unpushed `Route<void>`; the reader handles presentation,
+activity tracking and cleanup. Connect the builder's scroll controller to your
+sheet's scrolling coordinator. Omit this hook to use the standalone defaults.
+See [Architecture](docs/architecture.md) for the presentation contract.
 
 ## Example
 

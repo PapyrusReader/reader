@@ -131,7 +131,10 @@ Map<String, Object?> collectEpubContent(String html) {
     final style = <String, Object?>{...inherited};
     if (const {'strong', 'b', 'th'}.contains(tag)) style['bold'] = true;
     if (const {'em', 'i'}.contains(tag)) style['italic'] = true;
-    if (tag == 'u' || tag == 'a') style['underline'] = true;
+    if (tag == 'u' || (tag == 'a' && node.attributes['href'] != null)) {
+      style['underline'] = true;
+    }
+    if (tag == 'a' && node.attributes['href'] != null) style['link'] = true;
     if (tag == 's' || tag == 'del') style['strike'] = true;
     if (tag == 'code' || tag == 'pre') style['code'] = true;
     if (tag == 'br') runs.add({'text': '\n', ...style});

@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/widgets.dart';
 
 import '../../domain/reader_preferences.dart';
+import '../../presentation/reader_interaction_scope.dart';
 
 final class EpubContentBlock {
   EpubContentBlock(Map<String, Object?> json)
@@ -211,7 +212,45 @@ Widget buildEpubFragment(
       ),
     );
   }
-  return Text.rich(
+  final text = Text.rich(
     block.span(preferences, start: fragment.start, end: fragment.end),
+  );
+  if (!block.runs.any((run) => run['link'] == true)) {
+    return text;
+  }
+  return LayoutBuilder(
+    builder: (context, constraints) => Listener(
+      onPointerDown: (event) {
+        final painter = TextPainter(
+          text: block.span(
+            preferences,
+            start: fragment.start,
+            end: fragment.end,
+          ),
+          textDirection: Directionality.of(context),
+          textScaler: MediaQuery.textScalerOf(context),
+        )..layout(maxWidth: constraints.maxWidth);
+        var position = 0;
+        for (final run in block.runs) {
+          final end = position + (run['text'] as String).length;
+          final start = math.max(position, fragment.start) - fragment.start;
+          final stop = math.min(end, fragment.end) - fragment.start;
+          if (run['link'] == true && stop > start) {
+            final boxes = painter.getBoxesForSelection(
+              TextSelection(baseOffset: start, extentOffset: stop),
+            );
+            if (boxes.any(
+              (box) => box.toRect().contains(event.localPosition),
+            )) {
+              ReaderInteractionScope.maybeOf(context)?.suppressTap();
+              break;
+            }
+          }
+          position = end;
+        }
+        painter.dispose();
+      },
+      child: text,
+    ),
   );
 }

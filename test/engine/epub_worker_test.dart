@@ -3,11 +3,23 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:papyrus_reader/papyrus_reader.dart';
 import 'package:papyrus_reader/src/engine/epub/worker/epub_worker.dart';
+import 'package:papyrus_reader/src/engine/epub/worker/epub_content.dart';
 
 import '../support/synthetic_epub.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('named XHTML anchors do not underline the surrounding book text', () {
+    final content = collectEpubContent('<a id="chapter"/><p>Book text</p>');
+    final block = (content['blocks'] as List).single as Map;
+    expect((block['runs'] as List).single['underline'], isNot(true));
+    expect((content['anchors'] as Map)['chapter'], 0);
+    final link = collectEpubContent('<p><a href="#chapter">A link</a></p>');
+    expect(
+      ((link['blocks'] as List).single['runs'] as List).single['underline'],
+      isTrue,
+    );
+  });
   Future<List<String>> listText(String html) async {
     final worker = await createEpubWorker();
     addTearDown(worker.dispose);
