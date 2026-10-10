@@ -19,8 +19,10 @@ Read `docs/architecture.md` before changing architecture or expanding formats.
   This package commits `pubspec.lock` and pins its CI SDK so the
   browser worker and third-party notices are reproducible.
 - UI text measurement belongs in Flutter. Preserve semantic runs, Unicode,
-  illustrations and content offsets when reflowing. Layout must use the space
-  left after panels, system insets and text scaling, not device width alone.
+  illustrations and content offsets when reflowing. Layout must use actual viewport
+  constraints, system insets and text scaling.
+  Temporary shell panels overlay the viewport without changing pagination or
+  the reading position; opening them must not trigger a reflow.
 - Keep custom engines/renderers/builders usable. Don't silently expose settings
   that the active engine cannot apply.
 - Use in-process transport in widget tests with fake clocks; exercise native and

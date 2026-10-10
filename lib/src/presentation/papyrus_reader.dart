@@ -562,51 +562,6 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
                     ),
                   ),
                   PositionedDirectional(
-                    top: 0,
-                    start: 0,
-                    end: 0,
-                    child: _chromeVisibility(
-                      child: FocusTraversalOrder(
-                        key: const ValueKey('reader-toolbar'),
-                        order: const NumericFocusOrder(1),
-                        child: _overlayBar(
-                          theme,
-                          Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              toolbar ??
-                                  ReaderToolbar(
-                                    document: widget.document,
-                                    onBack: widget.onBack,
-                                    onTableOfContents: () => _openPanel(
-                                      context,
-                                      _ReaderPanel.tableOfContents,
-                                      isWide,
-                                      theme,
-                                    ),
-                                    onSettings: () => _openPanel(
-                                      context,
-                                      _ReaderPanel.settings,
-                                      isWide,
-                                      theme,
-                                    ),
-                                    tocFocusNode: _tocButtonFocusNode,
-                                    settingsFocusNode: _settingsButtonFocusNode,
-                                    theme: theme,
-                                    isWide: isWide,
-                                  ),
-                              if (_showBusy)
-                                const LinearProgressIndicator(
-                                  key: ValueKey('reader-command-progress'),
-                                  minHeight: 2,
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  PositionedDirectional(
                     bottom: 0,
                     start: 0,
                     end: 0,
@@ -638,42 +593,107 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
                       ),
                     ),
                   ),
-                  if (isWide && _panel != _ReaderPanel.none) ...[
-                    Positioned.fill(
-                      top: readerToolbarHeight(context, theme, isWide),
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: _closeWidePanel,
-                        child: const ColoredBox(color: Colors.transparent),
-                      ),
-                    ),
-                    PositionedDirectional(
-                      top: readerToolbarHeight(context, theme, isWide),
-                      bottom: 0,
-                      end: 0,
-                      width: theme.sidePanelWidth,
-                      child: FocusTraversalOrder(
-                        order: const NumericFocusOrder(2),
-                        child: _overlayBar(
-                          theme,
-                          ColoredBox(
-                            key: const ValueKey('reader-side-panel'),
-                            color: theme.panelColor,
-                            child: DecoratedBox(
-                              position: DecorationPosition.foreground,
-                              decoration: BoxDecoration(
-                                border: BorderDirectional(
-                                  start: BorderSide(color: theme.dividerColor),
-                                  top: BorderSide(color: theme.dividerColor),
-                                ),
+                  Positioned.fill(
+                    child: Column(
+                      children: [
+                        _chromeVisibility(
+                          child: FocusTraversalOrder(
+                            key: const ValueKey('reader-toolbar'),
+                            order: const NumericFocusOrder(1),
+                            child: _overlayBar(
+                              theme,
+                              Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  toolbar ??
+                                      ReaderToolbar(
+                                        document: widget.document,
+                                        onBack: widget.onBack,
+                                        onTableOfContents: () => _openPanel(
+                                          context,
+                                          _ReaderPanel.tableOfContents,
+                                          isWide,
+                                          theme,
+                                        ),
+                                        onSettings: () => _openPanel(
+                                          context,
+                                          _ReaderPanel.settings,
+                                          isWide,
+                                          theme,
+                                        ),
+                                        tocFocusNode: _tocButtonFocusNode,
+                                        settingsFocusNode:
+                                            _settingsButtonFocusNode,
+                                        theme: theme,
+                                        isWide: isWide,
+                                      ),
+                                  if (_showBusy)
+                                    const LinearProgressIndicator(
+                                      key: ValueKey('reader-command-progress'),
+                                      minHeight: 2,
+                                    ),
+                                ],
                               ),
-                              child: _buildWidePanel(context, snapshot, theme),
                             ),
                           ),
                         ),
-                      ),
+                        if (isWide && _panel != _ReaderPanel.none)
+                          Expanded(
+                            child: Stack(
+                              children: [
+                                Positioned.fill(
+                                  top: 0,
+                                  child: GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
+                                    onTap: _closeWidePanel,
+                                    child: const ColoredBox(
+                                      color: Colors.transparent,
+                                    ),
+                                  ),
+                                ),
+                                PositionedDirectional(
+                                  top: 0,
+                                  bottom: 0,
+                                  end: 0,
+                                  width: theme.sidePanelWidth,
+                                  child: FocusTraversalOrder(
+                                    order: const NumericFocusOrder(2),
+                                    child: _overlayBar(
+                                      theme,
+                                      ColoredBox(
+                                        key: const ValueKey(
+                                          'reader-side-panel',
+                                        ),
+                                        color: theme.panelColor,
+                                        child: DecoratedBox(
+                                          position:
+                                              DecorationPosition.foreground,
+                                          decoration: BoxDecoration(
+                                            border: BorderDirectional(
+                                              start: BorderSide(
+                                                color: theme.dividerColor,
+                                              ),
+                                              top: BorderSide(
+                                                color: theme.dividerColor,
+                                              ),
+                                            ),
+                                          ),
+                                          child: _buildWidePanel(
+                                            context,
+                                            snapshot,
+                                            theme,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                      ],
                     ),
-                  ],
+                  ),
                   if (_commandError case final error?)
                     PositionedDirectional(
                       bottom: 80,

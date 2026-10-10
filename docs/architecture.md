@@ -19,8 +19,10 @@ resolved in the target chapter. A fallback supports incomplete publisher spines.
 Malformed resources fail explicitly rather than silently shifting stored indices.
 
 The processor removes executable content and remote image/resource requests.
-Single-image SVG wrappers are reduced to their embedded raster image; this is
-cover support, not a general SVG renderer.
+Plain single-image SVG wrappers are reduced to their embedded raster image.
+Other SVG artwork stays in sanitized HTML for custom renderers, with local image
+resources embedded and remote or executable content removed. The default rich
+renderer does not implement general vector SVG rendering.
 The cache retains at most three chapters and at most four million HTML characters;
 oversized chapters can be read but are not retained. This is a cache bound, not a
 bound on the archive, rendered content or total process memory.
@@ -84,7 +86,9 @@ Neither changes reader geometry.
 Toolbar and progress controls overlay a full-size reading viewport, flush with the
 screen edges. The titleless toolbar uses the standard app-bar back button and
 56-pixel default height; the compact location label sits just above the progress track.
-Wide panels dock against the toolbar and side/bottom edges. Hiding controls
+Wide panels dock below the actual laid-out toolbar, including custom toolbar
+heights and size changes, and against the side/bottom edges. Panel placement is
+resolved in the same layout pass without resizing the reading viewport. Hiding controls
 leaves no reserved strips or persistent toggle; safe-area backgrounds match the page.
 Plain page taps toggle controls on both compact and wide viewports after excluding
 selection, link glyphs, dragging, long presses, double taps and multi-touch. Empty

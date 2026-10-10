@@ -183,8 +183,16 @@ final class EpubProcessor {
     for (final svg in document.querySelectorAll('svg').toList()) {
       final images = svg.querySelectorAll('image');
 
-      if (images.length != 1) {
-        svg.remove();
+      if (images.length != 1 ||
+          svg
+              .querySelectorAll('*')
+              .any(
+                (element) => !const {
+                  'image',
+                  'title',
+                  'desc',
+                }.contains(element.localName),
+              )) {
         continue;
       }
 
@@ -230,6 +238,11 @@ final class EpubProcessor {
       'source',
       'track',
       'use',
+      'foreignObject',
+      'animate',
+      'animateMotion',
+      'animateTransform',
+      'set',
     };
     for (final tag in blockedTags) {
       for (final element in document.querySelectorAll(tag).toList()) {
@@ -238,12 +251,24 @@ final class EpubProcessor {
     }
 
     for (final element in document.querySelectorAll('*').toList()) {
+      final isSvgImage = element.localName == 'image';
+      final imageSource = isSvgImage
+          ? element.attributes.entries
+                .where(
+                  (entry) => const {
+                    'href',
+                    'xlink:href',
+                  }.contains(entry.key.toString()),
+                )
+                .map((entry) => entry.value)
+                .firstOrNull
+          : element.attributes['src'];
       _sanitizeAttributes(element);
-      if (element.localName != 'img') {
+      if (element.localName != 'img' && !isSvgImage) {
         continue;
       }
 
-      final source = element.attributes['src']?.trim();
+      final source = imageSource?.trim();
       final uri = source == null ? null : Uri.tryParse(source);
       if (source == null ||
           source.isEmpty ||
@@ -274,7 +299,8 @@ final class EpubProcessor {
       }
       if (embedImages) {
         final bytes = await image.readContent();
-        element.attributes['src'] = 'data:$mime;base64,${base64Encode(bytes)}';
+        element.attributes[isSvgImage ? 'href' : 'src'] =
+            'data:$mime;base64,${base64Encode(bytes)}';
       }
     }
     return document.outerHtml;
@@ -283,7 +309,17 @@ final class EpubProcessor {
   void _sanitizeAttributes(html_dom.Element element) {
     for (final name in element.attributes.keys.toList()) {
       final normalizedName = name.toString().toLowerCase();
-      if (normalizedName.startsWith('on') || normalizedName == 'srcset') {
+      if (normalizedName.startsWith('on') ||
+          normalizedName == 'srcset' ||
+          normalizedName == 'xlink:href' ||
+          (normalizedName != 'style' &&
+              RegExp(
+                r'url\s*\(',
+                caseSensitive: false,
+              ).hasMatch(element.attributes[name]!) &&
+              !RegExp(
+                r'''^url\(\s*(['"]?)#[\w:.-]+\1\s*\)$''',
+              ).hasMatch(element.attributes[name]!))) {
         element.attributes.remove(name);
       }
     }
