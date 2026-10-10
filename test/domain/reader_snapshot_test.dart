@@ -5,7 +5,6 @@ import 'package:papyrus_reader/papyrus_reader.dart';
 
 void main() {
   final locator = EpubReaderLocator(
-    cfi: 'epubcfi(/6/2)',
     spineIndex: 0,
     localProgression: 0,
     totalProgression: 0,

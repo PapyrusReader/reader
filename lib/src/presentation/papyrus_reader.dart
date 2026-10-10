@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
@@ -17,6 +18,7 @@ import '../domain/reader_types.dart';
 import '../engine/reader_engine_registry.dart';
 import 'reader_material_theme.dart';
 import 'reader_controls.dart';
+import 'reader_surface.dart';
 import 'reader_contents_panel.dart';
 import 'reader_settings_panel.dart';
 import 'reader_theme_data.dart';
@@ -72,6 +74,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
   int _commandGeneration = 0;
   int _pendingCommands = 0;
   String? _commandError;
+  VoidCallback? _retryCommand;
   final ValueNotifier<int> _commandRevision = ValueNotifier<int>(0);
   Route<dynamic>? _compactPanelRoute;
   NavigatorState? _compactPanelNavigator;
@@ -86,14 +89,13 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
   );
   FocusNode? _widePanelOpener;
   final FocusNode _readerFocusNode = FocusNode(debugLabel: 'reader navigation');
-  final FocusNode _controlsToggleFocusNode = FocusNode(
-    debugLabel: 'reader controls toggle',
-  );
 
   ReaderActivityEvent? _lastActivity;
   bool _activityReportScheduled = false;
 
   bool get _isCommandBusy => _pendingCommands > 0;
+  Timer? _busyTimer;
+  bool _showBusy = false;
 
   @override
   void initState() {
@@ -137,8 +139,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
   }
 
   Map<ShortcutActivator, VoidCallback> get _keyBindings => {
-    if (!_controlsVisible)
-      const SingleActivator(LogicalKeyboardKey.escape): _toggleControls,
+    const SingleActivator(LogicalKeyboardKey.escape): _toggleControls,
     const SingleActivator(LogicalKeyboardKey.arrowLeft): _goPrevious,
     const SingleActivator(LogicalKeyboardKey.pageUp): _goPrevious,
     const SingleActivator(LogicalKeyboardKey.arrowRight): _goNext,
@@ -209,6 +210,8 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
     _commandGeneration++;
     _commandQueue = Future<void>.value();
     _pendingCommands = 0;
+    _busyTimer?.cancel();
+    _showBusy = false;
     _commandError = null;
 
     if (notify && mounted) {
@@ -259,7 +262,10 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
     final previous = _observedSnapshot;
     final next = _controller.snapshot;
     _observedSnapshot = next;
-    _dragProgress = null;
+
+    if (next.contentReady) {
+      _dragProgress = null;
+    }
 
     if (next.locator != null && next.locator != previous?.locator) {
       _invokeHostCallback(
@@ -329,6 +335,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
 
   @override
   void dispose() {
+    _busyTimer?.cancel();
     _dismissCompactPanel();
     _invalidateCommands(notify: false);
     _detachController();
@@ -337,7 +344,6 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
     _widePanelFocusNode.dispose();
     HardwareKeyboard.instance.removeHandler(_handleUnfocusedReadingKey);
     _readerFocusNode.dispose();
-    _controlsToggleFocusNode.dispose();
     _commandRevision.dispose();
     super.dispose();
   }
@@ -355,14 +361,13 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
       data: readerTheme,
       child: Builder(
         builder: (context) => Material(
-          color: theme.surfaceColor,
+          color: snapshot.status == ReaderStatus.ready
+              ? snapshot.preferences.backgroundColor
+              : theme.surfaceColor,
           child: SafeArea(
             child: switch (snapshot.status) {
               ReaderStatus.idle => _buildEmpty(context, snapshot, theme),
-              ReaderStatus.loading => _stateChrome(
-                _buildLoading(context, snapshot, theme),
-                theme,
-              ),
+              ReaderStatus.loading => _buildLoading(context, snapshot, theme),
               ReaderStatus.error => _stateChrome(
                 _buildError(context, snapshot, theme),
                 theme,
@@ -430,27 +435,10 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
       return builder(context, _stateContext(snapshot));
     }
 
-    final title = widget.document.title?.trim();
     return Center(
-      child: Padding(
-        padding: EdgeInsets.all(theme.panelPadding * 2),
-        child: Semantics(
-          liveRegion: true,
-          label: 'Opening document',
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircularProgressIndicator(color: theme.accentColor),
-              const SizedBox(height: 20),
-              Text(
-                title == null || title.isEmpty
-                    ? 'Opening document…'
-                    : 'Opening $title…',
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-        ),
+      child: CircularProgressIndicator(
+        color: theme.accentColor,
+        semanticsLabel: 'Opening document',
       ),
     );
   }
@@ -524,10 +512,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
       state: ui.ViewFocusState.focused,
       direction: ui.ViewFocusDirection.undefined,
     );
-    final focus = _controlsVisible && widget.builders.toolbar == null
-        ? _controlsToggleFocusNode
-        : _readerFocusNode;
-    focus.requestFocus();
+    _readerFocusNode.requestFocus();
   }
 
   Widget _buildReady(
@@ -569,157 +554,136 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
               autofocus: true,
               child: Stack(
                 children: [
-                  Column(
-                    children: [
-                      if (_controlsVisible)
-                        FocusTraversalOrder(
-                          key: const ValueKey('reader-toolbar'),
-                          order: const NumericFocusOrder(1),
-                          child:
+                  Positioned.fill(
+                    key: const ValueKey('reader-content'),
+                    child: FocusTraversalOrder(
+                      order: const NumericFocusOrder(3),
+                      child: _readingSurface(context, snapshot, isWide),
+                    ),
+                  ),
+                  PositionedDirectional(
+                    top: 0,
+                    start: 0,
+                    end: 0,
+                    child: _chromeVisibility(
+                      child: FocusTraversalOrder(
+                        key: const ValueKey('reader-toolbar'),
+                        order: const NumericFocusOrder(1),
+                        child: _overlayBar(
+                          theme,
+                          Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
                               toolbar ??
-                              ReaderToolbar(
-                                document: widget.document,
-                                onBack: widget.onBack,
-                                onTableOfContents: () => _openPanel(
-                                  context,
-                                  _ReaderPanel.tableOfContents,
-                                  isWide,
-                                  theme,
-                                ),
-                                onSettings: () => _openPanel(
-                                  context,
-                                  _ReaderPanel.settings,
-                                  isWide,
-                                  theme,
-                                ),
-                                tocFocusNode: _tocButtonFocusNode,
-                                settingsFocusNode: _settingsButtonFocusNode,
-                                theme: theme,
-                                isWide: isWide,
-                              ),
-                        ),
-                      if (_controlsVisible)
-                        SizedBox(
-                          key: const ValueKey('reader-toolbar-border'),
-                          height: 1,
-                          child: _isCommandBusy
-                              ? const LinearProgressIndicator(
-                                  key: ValueKey('reader-command-progress'),
-                                  minHeight: 1,
-                                )
-                              : ColoredBox(color: theme.dividerColor),
-                        ),
-                      if (_commandError case final error?)
-                        ReaderCommandError(
-                          message: error,
-                          theme: theme,
-                          onDismiss: () => setState(() => _commandError = null),
-                        ),
-                      Expanded(
-                        key: const ValueKey('reader-content'),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: FocusTraversalOrder(
-                                order: const NumericFocusOrder(3),
-                                child: _buildViewport(context, snapshot),
-                              ),
-                            ),
-                            if (isWide && _panel != _ReaderPanel.none) ...[
-                              VerticalDivider(
-                                width: 1,
-                                color: theme.dividerColor,
-                              ),
-                              FocusTraversalOrder(
-                                order: const NumericFocusOrder(2),
-                                child: SizedBox(
-                                  key: const ValueKey('reader-side-panel'),
-                                  width: theme.sidePanelWidth,
-                                  child: ColoredBox(
-                                    color: theme.panelColor,
-                                    child: _buildWidePanel(
+                                  ReaderToolbar(
+                                    document: widget.document,
+                                    onBack: widget.onBack,
+                                    onTableOfContents: () => _openPanel(
                                       context,
-                                      snapshot,
+                                      _ReaderPanel.tableOfContents,
+                                      isWide,
                                       theme,
                                     ),
+                                    onSettings: () => _openPanel(
+                                      context,
+                                      _ReaderPanel.settings,
+                                      isWide,
+                                      theme,
+                                    ),
+                                    tocFocusNode: _tocButtonFocusNode,
+                                    settingsFocusNode: _settingsButtonFocusNode,
+                                    theme: theme,
+                                    isWide: isWide,
                                   ),
+                              if (_showBusy)
+                                const LinearProgressIndicator(
+                                  key: ValueKey('reader-command-progress'),
+                                  minHeight: 2,
                                 ),
-                              ),
                             ],
-                          ],
-                        ),
-                      ),
-                      if (_controlsVisible)
-                        FocusTraversalOrder(
-                          key: const ValueKey('reader-progress-controls'),
-                          order: const NumericFocusOrder(4),
-                          child: ReaderProgressControls(
-                            progress:
-                                _dragProgress ?? _progressOf(snapshot.locator),
-                            locationLabel: snapshot.locationLabel,
-                            onProgressChanged: (value) {
-                              setState(() => _dragProgress = value);
-                            },
-                            onProgressChangeEnd: _goToProgress,
-                            onPrevious: _goPrevious,
-                            onNext: _goNext,
-                            enabled: !_isCommandBusy,
-                            theme: theme,
                           ),
                         ),
-                    ],
+                      ),
+                    ),
                   ),
-                  if (toolbar == null || !_controlsVisible)
-                    PositionedDirectional(
-                      key: const ValueKey('reader-controls-toggle'),
-                      top: _controlsVisible
-                          ? (readerToolbarHeight(context, theme, isWide) -
-                                    theme.minimumTargetSize) /
-                                2
-                          : 8,
-                      end: 8,
-                      child: ListenableBuilder(
-                        listenable: _controlsToggleFocusNode,
-                        builder: (context, _) {
-                          final label = _controlsVisible
-                              ? 'Hide controls'
-                              : 'Show controls';
-                          return Semantics(
-                            container: true,
-                            button: true,
-                            label: label,
-                            focusable: true,
-                            focused: _controlsToggleFocusNode.hasFocus,
-                            onTap: _toggleControls,
-                            onDidGainAccessibilityFocus:
-                                _controlsToggleFocusNode.requestFocus,
-                            excludeSemantics: true,
-                            child: Tooltip(
-                              message: label,
-                              excludeFromSemantics: true,
-                              child: Material(
-                                color: _controlsVisible
-                                    ? Colors.transparent
-                                    : theme.chromeColor,
-                                shape: const CircleBorder(),
-                                child: IconTheme(
-                                  data: IconThemeData(
-                                    color: theme.onChromeColor,
-                                  ),
-                                  child: ReaderIconButton(
-                                    icon: _controlsVisible
-                                        ? Icons.fullscreen_rounded
-                                        : Icons.fullscreen_exit_rounded,
-                                    tooltip: null,
-                                    focusNode: _controlsToggleFocusNode,
-                                    onPressed: _toggleControls,
-                                    theme: theme,
-                                  ),
-                                ),
+                  PositionedDirectional(
+                    bottom: 0,
+                    start: 0,
+                    end: 0,
+                    child: _chromeVisibility(
+                      child: _overlayBar(
+                        theme,
+                        Center(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 1000),
+                            child: FocusTraversalOrder(
+                              key: const ValueKey('reader-progress-controls'),
+                              order: const NumericFocusOrder(4),
+                              child: ReaderProgressControls(
+                                progress:
+                                    _dragProgress ??
+                                    _progressOf(snapshot.locator),
+                                locationLabel: snapshot.locationLabel,
+                                onProgressChanged: (value) =>
+                                    setState(() => _dragProgress = value),
+                                onProgressChangeEnd: _goToProgress,
+                                onPrevious: _goPrevious,
+                                onNext: _goNext,
+                                enabled: true,
+                                theme: theme,
                               ),
                             ),
-                          );
-                        },
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (isWide && _panel != _ReaderPanel.none) ...[
+                    Positioned.fill(
+                      top: readerToolbarHeight(context, theme, isWide),
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: _closeWidePanel,
+                        child: const ColoredBox(color: Colors.transparent),
+                      ),
+                    ),
+                    PositionedDirectional(
+                      top: readerToolbarHeight(context, theme, isWide),
+                      bottom: 0,
+                      end: 0,
+                      width: theme.sidePanelWidth,
+                      child: FocusTraversalOrder(
+                        order: const NumericFocusOrder(2),
+                        child: _overlayBar(
+                          theme,
+                          ColoredBox(
+                            key: const ValueKey('reader-side-panel'),
+                            color: theme.panelColor,
+                            child: DecoratedBox(
+                              position: DecorationPosition.foreground,
+                              decoration: BoxDecoration(
+                                border: BorderDirectional(
+                                  start: BorderSide(color: theme.dividerColor),
+                                  top: BorderSide(color: theme.dividerColor),
+                                ),
+                              ),
+                              child: _buildWidePanel(context, snapshot, theme),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                  if (_commandError case final error?)
+                    PositionedDirectional(
+                      bottom: 80,
+                      start: 8,
+                      end: 8,
+                      child: ReaderCommandError(
+                        message: error,
+                        theme: theme,
+                        onRetry: _retryCommand,
+                        onDismiss: () => setState(() => _commandError = null),
                       ),
                     ),
                 ],
@@ -728,6 +692,40 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
           ),
         );
       },
+    );
+  }
+
+  Widget _chromeVisibility({required Widget child}) => Visibility(
+    visible: _controlsVisible,
+    maintainState: true,
+    maintainAnimation: true,
+    child: child,
+  );
+
+  Widget _overlayBar(ReaderThemeData theme, Widget child) =>
+      Material(color: theme.chromeColor, elevation: 0, child: child);
+
+  Widget _readingSurface(
+    BuildContext context,
+    ReaderSnapshot snapshot,
+    bool isWide,
+  ) {
+    return Semantics(
+      key: const ValueKey('reader-surface-actions'),
+      container: true,
+      customSemanticsActions: {
+        CustomSemanticsAction(
+          label: _controlsVisible
+              ? 'Hide reading controls'
+              : 'Show reading controls',
+        ): _toggleControls,
+      },
+      child: ReaderSurface(
+        enabled: _panel == _ReaderPanel.none && _compactPanelRoute == null,
+        onToggle: _toggleControls,
+        onTurn: (direction) => direction > 0 ? _goNext() : _goPrevious(),
+        child: _buildViewport(context, snapshot),
+      ),
     );
   }
 
@@ -797,11 +795,11 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
         return;
       }
 
-      _widePanelOpener =
-          FocusManager.instance.primaryFocus ??
-          (panel == _ReaderPanel.tableOfContents
-              ? _tocButtonFocusNode
-              : _settingsButtonFocusNode);
+      _widePanelOpener = widget.builders.toolbar != null
+          ? FocusManager.instance.primaryFocus
+          : (panel == _ReaderPanel.tableOfContents
+                ? _tocButtonFocusNode
+                : _settingsButtonFocusNode);
       setState(() => _panel = panel);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && _panel == panel) {
@@ -813,89 +811,120 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
 
     final navigator = Navigator.of(context);
     final localizations = MaterialLocalizations.of(context);
-    late final ModalBottomSheetRoute<void> route;
-    route = ModalBottomSheetRoute<void>(
-      capturedThemes: InheritedTheme.capture(
-        from: context,
-        to: navigator.context,
-      ),
-      barrierLabel: localizations.scrimLabel,
-      barrierOnTapHint: localizations.scrimOnTapHint(
-        localizations.bottomSheetLabel,
-      ),
-      modalBarrierColor: Theme.of(context).bottomSheetTheme.modalBarrierColor,
-      useSafeArea: true,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      showDragHandle: false,
-      constraints: BoxConstraints(
-        maxWidth: theme.compactBreakpoint,
-        maxHeight: math.max(
-          160,
-          (MediaQuery.sizeOf(context).height -
-                  MediaQuery.viewInsetsOf(context).bottom) *
-              0.88,
-        ),
-      ),
-      builder: (sheetContext) {
-        Widget buildPanel() {
-          // Captured route themes are a snapshot. Appearance can change while
-          // this sheet is open, so use the current reader theme on every update.
-          final preferences = _controller.preferences;
-          final currentTheme = buildReaderMaterialTheme(
-            Theme.of(this.context),
-            preferences.brightness,
-          );
-          final colors = currentTheme.colorScheme;
-          final panelTheme =
-              widget.theme ?? ReaderThemeData.fromTheme(currentTheme);
-          return Theme(
-            data: currentTheme,
-            child: Builder(
-              builder: (context) => ClipRRect(
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(28),
-                ),
-                child: ColoredBox(
-                  color: panelTheme.panelColor,
-                  child: Column(
-                    children: [
-                      SizedBox(
-                        height: 32,
-                        child: Center(
-                          child: Container(
-                            width: 32,
-                            height: 4,
-                            decoration: BoxDecoration(
-                              color: colors.onSurfaceVariant,
-                              borderRadius: BorderRadius.circular(2),
-                            ),
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: _panelWidget(
-                          context,
-                          _controller.snapshot,
-                          panel,
-                          panelTheme,
-                          () => Navigator.of(sheetContext).pop(),
-                        ),
-                      ),
-                    ],
-                  ),
+    final customRoute = widget.builders.compactPanelRoute;
+    late final Route<void> route;
+    route = customRoute != null
+        ? customRoute(
+            context,
+            ReaderPanelRouteContext(
+              kind: panel == _ReaderPanel.settings
+                  ? ReaderPanelKind.settings
+                  : ReaderPanelKind.tableOfContents,
+              title: panel == _ReaderPanel.settings
+                  ? 'Reading settings'
+                  : 'Contents',
+              buildContent: (context, scrollController) => ListenableBuilder(
+                listenable: Listenable.merge([_controller, _commandRevision]),
+                builder: (context, child) => _panelWidget(
+                  context,
+                  _controller.snapshot,
+                  panel,
+                  ReaderThemeData.fromTheme(Theme.of(context)),
+                  () {
+                    if (route.isCurrent) navigator.pop();
+                  },
+                  showHeader: false,
+                  scrollController: scrollController,
                 ),
               ),
             ),
-          );
-        }
+          )
+        : ModalBottomSheetRoute<void>(
+            capturedThemes: InheritedTheme.capture(
+              from: context,
+              to: navigator.context,
+            ),
+            barrierLabel: localizations.scrimLabel,
+            barrierOnTapHint: localizations.scrimOnTapHint(
+              localizations.bottomSheetLabel,
+            ),
+            modalBarrierColor: Theme.of(
+              context,
+            ).bottomSheetTheme.modalBarrierColor,
+            useSafeArea: true,
+            isScrollControlled: true,
+            backgroundColor: Colors.transparent,
+            showDragHandle: false,
+            constraints: BoxConstraints(
+              maxWidth: theme.compactBreakpoint,
+              maxHeight: math.max(
+                160,
+                (MediaQuery.sizeOf(context).height -
+                        MediaQuery.viewInsetsOf(context).bottom) *
+                    0.88,
+              ),
+            ),
+            builder: (sheetContext) {
+              Widget buildPanel() {
+                // Captured route themes are a snapshot. Appearance can change while
+                // this sheet is open, so use the current reader theme on every update.
+                final preferences = _controller.preferences;
+                final currentTheme = buildReaderMaterialTheme(
+                  Theme.of(this.context),
+                  preferences.brightness,
+                );
+                final colors = currentTheme.colorScheme;
+                final panelTheme =
+                    widget.theme ?? ReaderThemeData.fromTheme(currentTheme);
+                return Theme(
+                  data: currentTheme,
+                  child: Builder(
+                    builder: (context) => Material(
+                      color: panelTheme.panelColor,
+                      clipBehavior: Clip.antiAlias,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: const BorderRadius.vertical(
+                          top: Radius.circular(28),
+                        ),
+                        side: BorderSide(color: panelTheme.dividerColor),
+                      ),
+                      child: Column(
+                        children: [
+                          SizedBox(
+                            height: 32,
+                            child: Center(
+                              child: Container(
+                                width: 32,
+                                height: 4,
+                                decoration: BoxDecoration(
+                                  color: colors.onSurfaceVariant,
+                                  borderRadius: BorderRadius.circular(2),
+                                ),
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            child: _panelWidget(
+                              context,
+                              _controller.snapshot,
+                              panel,
+                              panelTheme,
+                              () => Navigator.of(sheetContext).pop(),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }
 
-        return ListenableBuilder(
-          listenable: Listenable.merge([_controller, _commandRevision]),
-          builder: (context, child) => buildPanel(),
-        );
-      },
-    );
+              return ListenableBuilder(
+                listenable: Listenable.merge([_controller, _commandRevision]),
+                builder: (context, child) => buildPanel(),
+              );
+            },
+          );
     _compactPanelRoute = route;
     _compactPanelNavigator = navigator;
     _reportActivity();
@@ -933,8 +962,10 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
     ReaderSnapshot snapshot,
     _ReaderPanel panel,
     ReaderThemeData theme,
-    VoidCallback close,
-  ) {
+    VoidCallback close, {
+    bool showHeader = true,
+    ScrollController? scrollController,
+  }) {
     final state = ReaderPanelContext(
       snapshot: snapshot,
       controller: _controller,
@@ -946,6 +977,8 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
       _ReaderPanel.tableOfContents =>
         widget.builders.tableOfContents?.call(context, state) ??
             ReaderContentsPanel(
+              showHeader: showHeader,
+              scrollController: scrollController,
               snapshot: snapshot,
               close: close,
               theme: theme,
@@ -961,6 +994,8 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
       _ReaderPanel.settings =>
         widget.builders.settings?.call(context, state) ??
             ReaderSettingsPanel(
+              showHeader: showHeader,
+              scrollController: scrollController,
               snapshot: snapshot,
               close: close,
               theme: theme,
@@ -1015,6 +1050,14 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
         _readerFocusNode.hasFocus &&
         _panel == _ReaderPanel.none &&
         _compactPanelRoute == null;
+    if (_pendingCommands == 0) {
+      _busyTimer = Timer(const Duration(milliseconds: 300), () {
+        if (mounted && _isCommandBusy) {
+          setState(() => _showBusy = true);
+        }
+      });
+    }
+
     _pendingCommands++;
     _commandError = null;
     _commandRevision.value++;
@@ -1037,6 +1080,11 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
           return;
         }
 
+        _retryCommand = () => _enqueueCommand(
+          operation,
+          context: context,
+          expectedBoundary: expectedBoundary,
+        );
         _handleCommandError(error, stackTrace, context);
       }
     });
@@ -1046,6 +1094,11 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
       }
 
       _pendingCommands = math.max(0, _pendingCommands - 1);
+
+      if (!_isCommandBusy) {
+        _busyTimer?.cancel();
+        _showBusy = false;
+      }
       _commandRevision.value++;
       setState(() {});
       if (restoreReadingFocus) {

@@ -13,6 +13,34 @@ typedef ReaderStateBuilder =
 typedef ReaderViewportBuilder =
     Widget Function(BuildContext context, ReaderViewportContext state);
 
+/// Creates an unpushed compact panel route. The reader pushes and tracks it so
+/// document replacement and disposal dismiss only the reader's own panel.
+typedef ReaderPanelRouteBuilder =
+    Route<void> Function(BuildContext context, ReaderPanelRouteContext panel);
+
+/// Builds live panel content without a header, surface, or drag handle.
+/// Attach [scrollController] to the host sheet's coordinated scrolling surface.
+typedef ReaderPanelContentBuilder =
+    Widget Function(BuildContext context, ScrollController? scrollController);
+
+enum ReaderPanelKind { tableOfContents, settings }
+
+final class ReaderPanelRouteContext {
+  const ReaderPanelRouteContext({
+    required this.kind,
+    required this.title,
+    required this.buildContent,
+  });
+
+  final ReaderPanelKind kind;
+  final String title;
+
+  /// Content subscribes to reader changes and uses the theme at this context.
+  /// Navigation and settings still run through the reader's command queue.
+  /// Existing custom panel builders remain responsible for their own content.
+  final ReaderPanelContentBuilder buildContent;
+}
+
 final class ReaderToolbarContext {
   const ReaderToolbarContext({
     required this.document,
@@ -80,6 +108,7 @@ final class ReaderViewportContext {
 final class ReaderUiBuilders {
   const ReaderUiBuilders({
     this.toolbar,
+    this.compactPanelRoute,
     this.tableOfContents,
     this.settings,
     this.loading,
@@ -89,6 +118,9 @@ final class ReaderUiBuilders {
   });
 
   final ReaderToolbarBuilder? toolbar;
+
+  /// Overrides compact panel presentation; wide side panels are unchanged.
+  final ReaderPanelRouteBuilder? compactPanelRoute;
   final ReaderPanelBuilder? tableOfContents;
   final ReaderPanelBuilder? settings;
   final ReaderStateBuilder? loading;

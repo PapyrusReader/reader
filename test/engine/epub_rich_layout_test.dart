@@ -151,7 +151,6 @@ void main() {
         isTrue,
       );
       final locator = EpubReaderLocator(
-        cfi: 'epubcfi(/6/2)',
         spineIndex: 0,
         localProgression: .3,
         totalProgression: .1,

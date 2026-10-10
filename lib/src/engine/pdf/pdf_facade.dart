@@ -7,6 +7,7 @@ import 'package:flutter/widgets.dart';
 import 'package:pdfrx/pdfrx.dart';
 
 import '../../domain/reader_types.dart';
+import '../../presentation/reader_interaction_scope.dart';
 
 enum PdfFacadeError { invalid, encrypted }
 
@@ -310,7 +311,12 @@ final class _PdfrxFacade implements PdfFacade, DisposablePdfFacade {
               // Let pdfrx finish handling the wheel before snapping to the next row.
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 if (!_disposed && revision == _viewerRevision) {
-                  _turnSpread(delta > 0 ? 1 : -1);
+                  final turn = ReaderInteractionScope.maybeOf(context)?.onTurn;
+                  if (turn != null) {
+                    turn(delta > 0 ? 1 : -1);
+                  } else {
+                    _turnSpread(delta > 0 ? 1 : -1);
+                  }
                 }
               });
               WidgetsBinding.instance.scheduleFrame();
@@ -330,7 +336,13 @@ final class _PdfrxFacade implements PdfFacade, DisposablePdfFacade {
                   !_restoring &&
                   _atFit &&
                   (event.position.dx - start.dx).abs() > 70) {
-                _turnSpread(event.position.dx < start.dx ? 1 : -1);
+                final direction = event.position.dx < start.dx ? 1 : -1;
+                final turn = ReaderInteractionScope.maybeOf(context)?.onTurn;
+                if (turn != null) {
+                  turn(direction);
+                } else {
+                  _turnSpread(direction);
+                }
               }
             },
             onPointerCancel: (_) {
@@ -345,6 +357,10 @@ final class _PdfrxFacade implements PdfFacade, DisposablePdfFacade {
               params: buildPdfViewerParams(
                 configuration,
                 viewportSize: size,
+                onTextSelectionChange: (selection) =>
+                    ReaderInteractionScope.maybeOf(
+                      context,
+                    )?.onSelectionChanged(selection.hasSelectedText),
                 currentPageIndex: () => _pageIndex,
                 onViewerReady: (_, _) async {
                   if (_disposed || revision != _viewerRevision) return;
@@ -433,12 +449,16 @@ final class _PdfrxFacade implements PdfFacade, DisposablePdfFacade {
 PdfViewerParams buildPdfViewerParams(
   PdfViewportConfiguration configuration, {
   PdfViewerReadyCallback? onViewerReady,
+  PdfViewerTextSelectionChangeCallback? onTextSelectionChange,
   ValueChanged<int>? onPageChanged,
   Size viewportSize = const Size(800, 600),
   int Function()? currentPageIndex,
 }) {
   final paginated = configuration.layoutMode == ReaderLayoutMode.paginated;
   return PdfViewerParams(
+    textSelectionParams: PdfTextSelectionParams(
+      onTextSelectionChange: onTextSelectionChange,
+    ),
     backgroundColor: configuration.brightness == Brightness.dark
         ? Color.fromARGB(
             (configuration.backgroundColor.a * 255).round(),

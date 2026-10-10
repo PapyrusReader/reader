@@ -4,9 +4,10 @@ This is an independent Flutter package and Git repository. The owning workspace
 is one level up; use its `tools/flutter` and `tools/dart` SDK wrappers when present.
 Read `docs/architecture.md` before changing architecture or expanding formats.
 
-- Domain types are host-facing and serializable. Keep version-1 locators readable.
+- Domain types are host-facing and serializable. Implement the current locator contract
+  without compatibility shims for older app versions.
   EPUB content offsets are chapter-local normalized UTF-16 offsets, never page
-  numbers. Legacy CFI strings are compatibility data, not conformant anchors.
+  numbers. Standardized EPUB CFI interoperability is not implemented.
 - The host owns bytes, persistence, routing and account/profile isolation.
   Package engines own transient resources and must release them on cancellation.
 - EPUB document processing is pure Dart in `lib/src/engine/epub/worker`. Native

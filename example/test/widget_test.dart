@@ -47,7 +47,7 @@ void main() {
     expect(
       (memory.locatorFor('garden-letter') as EpubReaderLocator)
           .totalProgression,
-      0.65,
+      1.0,
     );
     expect(memory.preferencesFor('garden-letter')!.fontSize, 25);
 
@@ -61,7 +61,7 @@ void main() {
     await tester.tap(readEpub);
     await tester.pumpAndSettle();
     expect(find.byType(PapyrusReader), findsOneWidget);
-    expect(tester.widget<Slider>(find.byType(Slider)).value, 0.65);
+    expect(tester.widget<Slider>(find.byType(Slider)).value, 1.0);
 
     await tester.tap(find.byTooltip('Reading settings'));
     await tester.pumpAndSettle();

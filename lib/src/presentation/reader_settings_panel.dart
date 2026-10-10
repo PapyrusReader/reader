@@ -10,6 +10,8 @@ import 'reader_theme_data.dart';
 final class ReaderSettingsPanel extends StatelessWidget {
   const ReaderSettingsPanel({
     super.key,
+    this.showHeader = true,
+    this.scrollController,
     required this.snapshot,
     required this.close,
     required this.theme,
@@ -19,6 +21,8 @@ final class ReaderSettingsPanel extends StatelessWidget {
     required this.onUpdatePreferences,
   });
 
+  final bool showHeader;
+  final ScrollController? scrollController;
   final ReaderSnapshot snapshot;
   final VoidCallback close;
   final ReaderThemeData theme;
@@ -32,6 +36,190 @@ final class ReaderSettingsPanel extends StatelessWidget {
     final capabilities = snapshot.capabilities ?? const ReaderCapabilities();
     final preferences = snapshot.preferences;
 
+    final content = ListView(
+      controller: scrollController,
+      shrinkWrap: !showHeader,
+      padding: EdgeInsets.all(theme.panelPadding),
+      children: [
+        if (capabilities.supportsTextCustomization) ...[
+          DropdownButtonFormField<String>(
+            key: ValueKey(('reader-font', preferences.fontFamily)),
+            initialValue:
+                const <String?>[
+                  null,
+                  'serif',
+                  'sans-serif',
+                  'monospace',
+                ].contains(preferences.fontFamily)
+                ? preferences.fontFamily ?? 'system'
+                : 'system',
+            isExpanded: true,
+            decoration: const InputDecoration(
+              labelText: 'Typeface',
+              border: OutlineInputBorder(),
+            ),
+            items: const [
+              DropdownMenuItem(value: 'system', child: Text('System')),
+              DropdownMenuItem(value: 'serif', child: Text('Serif')),
+              DropdownMenuItem(value: 'sans-serif', child: Text('Sans serif')),
+              DropdownMenuItem(value: 'monospace', child: Text('Monospace')),
+            ],
+            onChanged: enabled
+                ? (value) => _update(
+                    preferences.copyWith(
+                      fontFamily: value == 'system' ? null : value,
+                    ),
+                  )
+                : null,
+          ),
+          const SizedBox(height: 20),
+          _SettingSlider(
+            title: 'Font size',
+            value: preferences.fontSize.clamp(8, 72),
+            min: 8,
+            max: 72,
+            divisions: 64,
+            valueLabel: preferences.fontSize.round().toString(),
+            enabled: enabled,
+            isBusy: isBusy,
+            commandRevision: commandRevision,
+            onChangeEnd: (value) =>
+                _update(preferences.copyWith(fontSize: value)),
+          ),
+          _SettingSlider(
+            title: 'Line height',
+            value: preferences.lineHeight.clamp(1, 2.5),
+            min: 1,
+            max: 2.5,
+            divisions: 15,
+            valueLabel: preferences.lineHeight.toStringAsFixed(1),
+            enabled: enabled,
+            isBusy: isBusy,
+            commandRevision: commandRevision,
+            onChangeEnd: (value) =>
+                _update(preferences.copyWith(lineHeight: value)),
+          ),
+          _SettingSlider(
+            title: 'Margins',
+            value: preferences.pageMargins.left.clamp(0, 64),
+            min: 0,
+            max: 64,
+            divisions: 16,
+            valueLabel: preferences.pageMargins.left.round().toString(),
+            enabled: enabled,
+            isBusy: isBusy,
+            commandRevision: commandRevision,
+            onChangeEnd: (value) => _update(
+              preferences.copyWith(pageMargins: EdgeInsets.all(value)),
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
+        if (capabilities.supportsPagination ||
+            capabilities.supportsScrolling) ...[
+          DropdownButtonFormField<ReaderLayoutMode>(
+            key: ValueKey(('reader-mode', preferences.layoutMode)),
+            initialValue: preferences.layoutMode,
+            isExpanded: true,
+            decoration: const InputDecoration(
+              labelText: 'Reading mode',
+              border: OutlineInputBorder(),
+            ),
+            items: [
+              if (capabilities.supportsPagination)
+                const DropdownMenuItem(
+                  value: ReaderLayoutMode.paginated,
+                  child: Text('Paginated'),
+                ),
+              if (capabilities.supportsScrolling)
+                const DropdownMenuItem(
+                  value: ReaderLayoutMode.scroll,
+                  child: Text('Continuous scroll'),
+                ),
+            ],
+            onChanged: enabled
+                ? (value) {
+                    if (value != null) {
+                      _update(preferences.copyWith(layoutMode: value));
+                    }
+                  }
+                : null,
+          ),
+        ],
+        if (capabilities.supportsColumnMode) ...[
+          const SizedBox(height: 12),
+          DropdownButtonFormField<ReaderColumnMode>(
+            key: ValueKey(('reader-columns', preferences.columnMode)),
+            initialValue: preferences.columnMode,
+            isExpanded: true,
+            decoration: const InputDecoration(
+              labelText: 'Columns',
+              border: OutlineInputBorder(),
+            ),
+            items: const [
+              DropdownMenuItem(
+                value: ReaderColumnMode.automatic,
+                child: Text('Automatic'),
+              ),
+              DropdownMenuItem(
+                value: ReaderColumnMode.single,
+                child: Text('Single'),
+              ),
+              DropdownMenuItem(
+                value: ReaderColumnMode.double,
+                child: Text('Double'),
+              ),
+            ],
+            onChanged: enabled
+                ? (value) {
+                    if (value != null) {
+                      _update(preferences.copyWith(columnMode: value));
+                    }
+                  }
+                : null,
+          ),
+        ],
+        const SizedBox(height: 20),
+        Text('Page appearance', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            _AppearancePreset(
+              label: 'Light',
+              selected:
+                  preferences.brightness == Brightness.light &&
+                  preferences.backgroundColor == const Color(0xffffffff),
+              background: const Color(0xffffffff),
+              foreground: const Color(0xff1b1b1b),
+              brightness: Brightness.light,
+              enabled: enabled,
+              onSelected: _applyAppearance,
+            ),
+            _AppearancePreset(
+              label: 'Sepia',
+              selected: preferences.backgroundColor == const Color(0xfff4ecd8),
+              background: const Color(0xfff4ecd8),
+              foreground: const Color(0xff3d3527),
+              brightness: Brightness.light,
+              enabled: enabled,
+              onSelected: _applyAppearance,
+            ),
+            _AppearancePreset(
+              label: 'Night',
+              selected: preferences.brightness == Brightness.dark,
+              background: const Color(0xff151719),
+              foreground: const Color(0xffece7de),
+              brightness: Brightness.dark,
+              enabled: enabled,
+              onSelected: _applyAppearance,
+            ),
+          ],
+        ),
+      ],
+    );
+    if (!showHeader) return content;
     return Column(
       children: [
         ReaderPanelHeader(
@@ -39,199 +227,7 @@ final class ReaderSettingsPanel extends StatelessWidget {
           close: close,
           theme: theme,
         ),
-        Expanded(
-          child: ListView(
-            padding: EdgeInsets.all(theme.panelPadding),
-            children: [
-              if (capabilities.supportsTextCustomization) ...[
-                DropdownButtonFormField<String>(
-                  key: ValueKey(('reader-font', preferences.fontFamily)),
-                  initialValue:
-                      const <String?>[
-                        null,
-                        'serif',
-                        'sans-serif',
-                        'monospace',
-                      ].contains(preferences.fontFamily)
-                      ? preferences.fontFamily ?? 'system'
-                      : 'system',
-                  isExpanded: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Typeface',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: const [
-                    DropdownMenuItem(value: 'system', child: Text('System')),
-                    DropdownMenuItem(value: 'serif', child: Text('Serif')),
-                    DropdownMenuItem(
-                      value: 'sans-serif',
-                      child: Text('Sans serif'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'monospace',
-                      child: Text('Monospace'),
-                    ),
-                  ],
-                  onChanged: enabled
-                      ? (value) => _update(
-                          preferences.copyWith(
-                            fontFamily: value == 'system' ? null : value,
-                          ),
-                        )
-                      : null,
-                ),
-                const SizedBox(height: 20),
-                _SettingSlider(
-                  title: 'Font size',
-                  value: preferences.fontSize.clamp(8, 72),
-                  min: 8,
-                  max: 72,
-                  divisions: 64,
-                  valueLabel: preferences.fontSize.round().toString(),
-                  enabled: enabled,
-                  isBusy: isBusy,
-                  commandRevision: commandRevision,
-                  onChangeEnd: (value) =>
-                      _update(preferences.copyWith(fontSize: value)),
-                ),
-                _SettingSlider(
-                  title: 'Line height',
-                  value: preferences.lineHeight.clamp(1, 2.5),
-                  min: 1,
-                  max: 2.5,
-                  divisions: 15,
-                  valueLabel: preferences.lineHeight.toStringAsFixed(1),
-                  enabled: enabled,
-                  isBusy: isBusy,
-                  commandRevision: commandRevision,
-                  onChangeEnd: (value) =>
-                      _update(preferences.copyWith(lineHeight: value)),
-                ),
-                _SettingSlider(
-                  title: 'Margins',
-                  value: preferences.pageMargins.left.clamp(0, 64),
-                  min: 0,
-                  max: 64,
-                  divisions: 16,
-                  valueLabel: preferences.pageMargins.left.round().toString(),
-                  enabled: enabled,
-                  isBusy: isBusy,
-                  commandRevision: commandRevision,
-                  onChangeEnd: (value) => _update(
-                    preferences.copyWith(pageMargins: EdgeInsets.all(value)),
-                  ),
-                ),
-                const SizedBox(height: 12),
-              ],
-              if (capabilities.supportsPagination ||
-                  capabilities.supportsScrolling) ...[
-                DropdownButtonFormField<ReaderLayoutMode>(
-                  key: ValueKey(('reader-mode', preferences.layoutMode)),
-                  initialValue: preferences.layoutMode,
-                  isExpanded: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Reading mode',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: [
-                    if (capabilities.supportsPagination)
-                      const DropdownMenuItem(
-                        value: ReaderLayoutMode.paginated,
-                        child: Text('Paginated'),
-                      ),
-                    if (capabilities.supportsScrolling)
-                      const DropdownMenuItem(
-                        value: ReaderLayoutMode.scroll,
-                        child: Text('Continuous scroll'),
-                      ),
-                  ],
-                  onChanged: enabled
-                      ? (value) {
-                          if (value != null) {
-                            _update(preferences.copyWith(layoutMode: value));
-                          }
-                        }
-                      : null,
-                ),
-              ],
-              if (capabilities.supportsColumnMode) ...[
-                const SizedBox(height: 12),
-                DropdownButtonFormField<ReaderColumnMode>(
-                  key: ValueKey(('reader-columns', preferences.columnMode)),
-                  initialValue: preferences.columnMode,
-                  isExpanded: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Columns',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: const [
-                    DropdownMenuItem(
-                      value: ReaderColumnMode.automatic,
-                      child: Text('Automatic'),
-                    ),
-                    DropdownMenuItem(
-                      value: ReaderColumnMode.single,
-                      child: Text('Single'),
-                    ),
-                    DropdownMenuItem(
-                      value: ReaderColumnMode.double,
-                      child: Text('Double'),
-                    ),
-                  ],
-                  onChanged: enabled
-                      ? (value) {
-                          if (value != null) {
-                            _update(preferences.copyWith(columnMode: value));
-                          }
-                        }
-                      : null,
-                ),
-              ],
-              const SizedBox(height: 20),
-              Text(
-                'Page appearance',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  _AppearancePreset(
-                    label: 'Light',
-                    selected:
-                        preferences.brightness == Brightness.light &&
-                        preferences.backgroundColor == const Color(0xffffffff),
-                    background: const Color(0xffffffff),
-                    foreground: const Color(0xff1b1b1b),
-                    brightness: Brightness.light,
-                    enabled: enabled,
-                    onSelected: _applyAppearance,
-                  ),
-                  _AppearancePreset(
-                    label: 'Sepia',
-                    selected:
-                        preferences.backgroundColor == const Color(0xfff4ecd8),
-                    background: const Color(0xfff4ecd8),
-                    foreground: const Color(0xff3d3527),
-                    brightness: Brightness.light,
-                    enabled: enabled,
-                    onSelected: _applyAppearance,
-                  ),
-                  _AppearancePreset(
-                    label: 'Night',
-                    selected: preferences.brightness == Brightness.dark,
-                    background: const Color(0xff151719),
-                    foreground: const Color(0xffece7de),
-                    brightness: Brightness.dark,
-                    enabled: enabled,
-                    onSelected: _applyAppearance,
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
+        Expanded(child: content),
       ],
     );
   }

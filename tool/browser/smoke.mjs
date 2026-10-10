@@ -103,24 +103,30 @@ try {
   assert.ok(beforeWheel && afterWheel && Math.abs(beforeWheel.y - afterWheel.y) < 1,
     'A normal paginated column must fit without hidden vertical overflow');
   await screenshot('desktop');
+  const tapPage = async () => {
+    const { width, height } = page.viewportSize();
+    await page.mouse.click(width / 2, height / 2);
+    await settle();
+  };
   const hideControls = async () => {
-    await page.getByRole('button', { name: 'Hide controls', exact: true }).click();
+    await tapPage();
     await settle();
     for (const name of ['Back', 'Reading settings', 'Table of contents', 'Next', 'Previous']) {
       assert.equal(await page.getByRole('button', { name, exact: true }).count(), 0,
         `${name} must be hidden in focus mode`);
     }
-    await page.getByRole('button', { name: 'Show controls', exact: true }).waitFor();
+    assert.equal(await page.getByRole('button', { name: 'Show controls', exact: true }).count(), 0);
   };
   await hideControls();
   const focusedParagraph = await paragraph.boundingBox();
   assert.ok(focusedParagraph && focusedParagraph.y < 850 &&
     focusedParagraph.y + focusedParagraph.height > 0,
-    'Expanding the reading area must keep the current EPUB paragraph visible');
+    'Overlay controls must keep the current EPUB paragraph visible');
+  assert.ok(Math.abs(focusedParagraph.y - beforeWheel.y) < 1, 'Hiding overlays must not move text');
   await screenshot('desktop-focus');
   await page.keyboard.press('Escape');
   await settle();
-  await page.getByRole('button', { name: 'Hide controls', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Reading settings', exact: true }).waitFor();
   await page.setViewportSize({ width: 390, height: 844 });
   await settle();
   await page.getByRole('button', { name: 'Reading settings', exact: true }).click();
@@ -137,7 +143,7 @@ try {
   await screenshot('mobile-night');
   await hideControls();
   await screenshot('mobile-focus');
-  await page.getByRole('button', { name: 'Show controls', exact: true }).click();
+  await tapPage();
   await settle();
   await page.setViewportSize({ width: 700, height: 360 });
   await settle();
@@ -209,7 +215,7 @@ try {
   await page.keyboard.press('ArrowLeft');
   await page.getByText('Page 2 of 3.', { exact: true }).waitFor();
   await settle();
-  await page.getByRole('button', { name: 'Show controls', exact: true }).click();
+  await tapPage();
   await settle();
   await page.getByLabel(/Page 2 of 3/).waitFor();
   await page.getByRole('button', { name: 'Back', exact: true }).click();
@@ -242,8 +248,8 @@ try {
   await screenshot('pdf-night-single');
   const pdfPage = () => page.getByRole('group', { name: 'Page 2', exact: true });
   const singleBefore = await pdfPage().boundingBox();
-  assert.ok(singleBefore && singleBefore.x >= 0 && singleBefore.x + singleBefore.width <= 920,
-    'Single PDF page must fit the width left by the settings panel');
+  assert.ok(singleBefore && singleBefore.x >= 0 && singleBefore.x + singleBefore.width <= 1280,
+    'Single PDF page must fit the full viewport beneath the settings overlay');
   await select('Single', 'Double');
   await screenshot('pdf-night-double');
   await select('Double', 'Single');

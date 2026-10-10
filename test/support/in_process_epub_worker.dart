@@ -40,3 +40,26 @@ final class InProcessEpubWorker implements EpubWorker {
     disposed = true;
   }
 }
+
+Future<void> pumpReaderCommand(
+  WidgetTester tester,
+  Future<void> command,
+) async {
+  var finished = false;
+  Object? failure;
+  command.then(
+    (_) => finished = true,
+    onError: (Object error) {
+      failure = error;
+      finished = true;
+    },
+  );
+  for (var frame = 0; !finished && frame < 1000; frame++) {
+    await tester.pump(const Duration(milliseconds: 16));
+  }
+  expect(finished, isTrue, reason: 'Reader command did not complete');
+  if (failure != null) {
+    throw failure!;
+  }
+  await tester.pumpAndSettle();
+}
