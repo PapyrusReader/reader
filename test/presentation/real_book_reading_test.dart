@@ -40,36 +40,33 @@ void main() {
     );
   }
 
-  test(
-    'native worker preserves content offsets across restart',
-    () async {
-      for (final name in ['alice', 'pride-and-prejudice']) {
-        final bytes = File(
-          'test/fixtures/gutenberg/$name.epub',
-        ).readAsBytesSync();
-        final document = ReaderDocument(
-          id: name,
-          format: ReaderFormat.epub,
-          loadBytes: () async => bytes,
-        );
-        final engine = EpubReaderEngine();
-        await engine.load(document, preferences: const ReaderPreferences());
-        await engine.goToProgress(.55);
-        final position = engine.locator;
-        expect(position.totalProgression, closeTo(.55, .0001));
-        engine.dispose();
-        final reopened = EpubReaderEngine();
-        await reopened.load(
-          document,
-          initialLocator: position,
-          preferences: const ReaderPreferences(fontSize: 30),
-        );
-        expect(reopened.locator.textOffset, position.textOffset);
-        expect(reopened.locator.totalProgression, position.totalProgression);
-        reopened.dispose();
-      }
-    },
-  );
+  test('native worker preserves content offsets across restart', () async {
+    for (final name in ['alice', 'pride-and-prejudice']) {
+      final bytes = File(
+        'test/fixtures/gutenberg/$name.epub',
+      ).readAsBytesSync();
+      final document = ReaderDocument(
+        id: name,
+        format: ReaderFormat.epub,
+        loadBytes: () async => bytes,
+      );
+      final engine = EpubReaderEngine();
+      await engine.load(document, preferences: const ReaderPreferences());
+      await engine.goToProgress(.55);
+      final position = engine.locator;
+      expect(position.totalProgression, closeTo(.55, .0001));
+      engine.dispose();
+      final reopened = EpubReaderEngine();
+      await reopened.load(
+        document,
+        initialLocator: position,
+        preferences: const ReaderPreferences(fontSize: 30),
+      );
+      expect(reopened.locator.textOffset, position.textOffset);
+      expect(reopened.locator.totalProgression, position.totalProgression);
+      reopened.dispose();
+    }
+  });
 
   testWidgets(
     'slow and failed chapter preparation retain the committed page and progress',
