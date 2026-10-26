@@ -70,8 +70,37 @@ try {
   assert.ok(protocol.blocks > 20);
   assert.equal(protocol.error, 'invalidDocument');
 
+  const settle = () => page.evaluate(() => new Promise(resolve => {
+    let frames = 0;
+    const tick = () => ++frames >= 60 ? resolve() : requestAnimationFrame(tick);
+    requestAnimationFrame(tick);
+  }));
+  const tapPage = async () => {
+    const { width, height } = page.viewportSize();
+    await page.mouse.click(width / 2, height / 2);
+    await settle();
+  };
+  const assertControlsHidden = async () => {
+    for (const name of ['Back', 'Reading settings', 'Table of contents', 'Next', 'Previous']) {
+      assert.equal(await page.getByRole('button', { name, exact: true }).count(), 0,
+        `${name} must be hidden in focus mode`);
+    }
+    assert.equal(await page.getByRole('button', { name: 'Show controls', exact: true }).count(), 0);
+  };
+  const hideControls = async () => {
+    await tapPage();
+    await assertControlsHidden();
+  };
+  const showInitialControls = async ready => {
+    await ready.waitFor();
+    await settle();
+    await assertControlsHidden();
+    await tapPage();
+    await page.getByRole('button', { name: 'Next', exact: true }).waitFor();
+  };
+
   await page.getByRole('button', { name: 'Explore layouts', exact: true }).click();
-  await page.getByRole('button', { name: 'Next', exact: true }).waitFor();
+  await showInitialControls(page.getByText('At the Gate', { exact: true }).first());
   await page.waitForFunction(() => document.body.innerText.includes('Passage 1.'));
   await page.getByRole('button', { name: 'Next', exact: true }).click();
   await page.waitForFunction(() => !document.body.innerText.includes('Passage 1. Reading'));
@@ -84,11 +113,6 @@ try {
     await mkdir(folder, { recursive: true });
     await page.screenshot({ path: resolve(folder, `${name}.png`) });
   };
-  const settle = () => page.evaluate(() => new Promise(resolve => {
-    let frames = 0;
-    const tick = () => ++frames >= 60 ? resolve() : requestAnimationFrame(tick);
-    requestAnimationFrame(tick);
-  }));
   await settle();
   const passage = /Passage (\d+)\. Reading/.exec(await page.locator('body').innerText());
   assert.ok(passage, 'The next spread must contain readable paragraphs');
@@ -103,20 +127,6 @@ try {
   assert.ok(beforeWheel && afterWheel && Math.abs(beforeWheel.y - afterWheel.y) < 1,
     'A normal paginated column must fit without hidden vertical overflow');
   await screenshot('desktop');
-  const tapPage = async () => {
-    const { width, height } = page.viewportSize();
-    await page.mouse.click(width / 2, height / 2);
-    await settle();
-  };
-  const hideControls = async () => {
-    await tapPage();
-    await settle();
-    for (const name of ['Back', 'Reading settings', 'Table of contents', 'Next', 'Previous']) {
-      assert.equal(await page.getByRole('button', { name, exact: true }).count(), 0,
-        `${name} must be hidden in focus mode`);
-    }
-    assert.equal(await page.getByRole('button', { name: 'Show controls', exact: true }).count(), 0);
-  };
   await hideControls();
   const focusedParagraph = await paragraph.boundingBox();
   assert.ok(focusedParagraph && focusedParagraph.y < 850 &&
@@ -164,8 +174,7 @@ try {
     await (await chooser).setFiles(path);
   };
   await openFile(resolve(reader, 'example/assets/reading_lab.epub'));
-  await page.getByRole('button', { name: 'Next', exact: true }).waitFor();
-  await page.waitForFunction(() => document.body.innerText.includes('At the Gate'));
+  await showInitialControls(page.getByText('At the Gate', { exact: true }).first());
   await page.getByRole('button', { name: 'Back', exact: true }).click();
   await settle();
   const invalid = resolve(temp, 'invalid.epub');
@@ -181,7 +190,7 @@ try {
   await page.getByRole('button', { name: 'Read EPUB', exact: true }).click();
   await page.getByText('At the Gate', { exact: true }).first().waitFor();
   await settle();
-  await hideControls();
+  await assertControlsHidden();
   for (let turn = 0; turn < 3; turn++) {
     await page.keyboard.press('ArrowRight');
     await page.getByText('After the Rain', { exact: true }).first().waitFor();
@@ -197,7 +206,7 @@ try {
   await page.setViewportSize({ width: 700, height: 360 });
 
   await page.getByRole('button', { name: 'Read PDF', exact: true }).click();
-  await page.getByRole('button', { name: 'Next', exact: true }).waitFor();
+  await showInitialControls(page.getByText('Page 1 of 3.', { exact: true }));
   await settle();
   await screenshot('pdf-initial');
   await page.getByLabel(/Page 1 of 3/).waitFor();
@@ -221,6 +230,7 @@ try {
   await page.getByRole('button', { name: 'Back', exact: true }).click();
   await settle();
   await page.getByRole('button', { name: 'Read PDF', exact: true }).click();
+  await showInitialControls(page.getByText('Page 2 of 3.', { exact: true }));
   await page.getByLabel(/Page 2 of 3/).waitFor();
   await settle();
   await page.getByRole('button', { name: 'Reading settings', exact: true }).click();
@@ -242,7 +252,7 @@ try {
     await settle();
   };
   await screenshot('pdf-wide-settings');
-  await select('Automatic', 'Single');
+  await page.getByRole('button', { name: /Single/ }).waitFor();
   await page.getByLabel('Night', { exact: true }).click();
   await settle();
   await screenshot('pdf-night-single');
@@ -315,7 +325,7 @@ try {
   await page.getByRole('button', { name: 'Use dark theme', exact: true }).click();
   await settle();
   await page.getByRole('button', { name: 'Read EPUB', exact: true }).click();
-  await page.getByRole('button', { name: 'Reading settings', exact: true }).waitFor();
+  await showInitialControls(page.getByText('At the Gate', { exact: true }).first());
   await settle();
   await page.getByRole('button', { name: 'Reading settings', exact: true }).click();
   await settle();
