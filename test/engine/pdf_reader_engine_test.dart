@@ -73,7 +73,12 @@ void main() {
       final facade = FakePdfFacade(pageCount: 5);
       final engine = PdfReaderEngine(facadeFactory: (_) async => facade);
       addTearDown(engine.dispose);
-      await engine.load(document(), preferences: const ReaderPreferences());
+      await engine.load(
+        document(),
+        preferences: const ReaderPreferences(
+          columnMode: ReaderColumnMode.automatic,
+        ),
+      );
       await tester.pumpWidget(
         Directionality(
           textDirection: TextDirection.ltr,
@@ -88,7 +93,10 @@ void main() {
       await engine.goPrevious();
       expect((await engine.currentLocator() as PdfReaderLocator).pageIndex, 2);
       await engine.updatePreferences(
-        const ReaderPreferences(layoutMode: ReaderLayoutMode.scroll),
+        const ReaderPreferences(
+          layoutMode: ReaderLayoutMode.scroll,
+          columnMode: ReaderColumnMode.automatic,
+        ),
       );
       await engine.goNext();
       expect((await engine.currentLocator() as PdfReaderLocator).pageIndex, 3);

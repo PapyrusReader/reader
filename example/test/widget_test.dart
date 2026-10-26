@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:papyrus_reader/papyrus_reader.dart';
 import 'package:papyrus_reader_example/main.dart';
@@ -30,6 +31,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(PapyrusReader), findsOneWidget);
+    expect(find.byType(Slider), findsNothing);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
 
     final progressSlider = tester.widget<Slider>(find.byType(Slider));
     progressSlider.onChangeEnd!(0.65);
@@ -61,6 +65,9 @@ void main() {
     await tester.tap(readEpub);
     await tester.pumpAndSettle();
     expect(find.byType(PapyrusReader), findsOneWidget);
+    expect(find.byType(Slider), findsNothing);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
     expect(tester.widget<Slider>(find.byType(Slider)).value, 1.0);
 
     await tester.tap(find.byTooltip('Reading settings'));

@@ -98,6 +98,8 @@ void main() {
         find.byKey(const ValueKey('reader-content')),
       );
       final original = engine.snapshot.locator;
+      await tester.tapAt(bounds.center);
+      await tester.pump(const Duration(milliseconds: 350));
       await tester.tap(find.byTooltip('Next'));
       await tester.pump(const Duration(milliseconds: 350));
       expect(find.text('Preparing pages…'), findsNothing);
@@ -157,6 +159,9 @@ void main() {
         expect(engine.locator.totalProgression, 0);
         final content = find.byKey(const ValueKey('reader-content'));
         final bounds = tester.getRect(content);
+        expect(find.byTooltip('Reading settings'), findsNothing);
+        await tester.tapAt(bounds.center);
+        await tester.pump(const Duration(milliseconds: 350));
         final label = tester.getRect(find.text(engine.snapshot.locationLabel!));
         final slider = tester.getRect(find.byType(Slider));
         expect(slider.center.dy - label.bottom, 11);

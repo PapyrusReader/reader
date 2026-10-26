@@ -23,6 +23,7 @@ import 'reader_contents_panel.dart';
 import 'reader_settings_panel.dart';
 import 'reader_theme_data.dart';
 import 'reader_ui_builders.dart';
+import '../domain/reader_selection.dart';
 
 enum _ReaderPanel { none, tableOfContents, settings }
 
@@ -38,6 +39,11 @@ final class PapyrusReader extends StatefulWidget {
     this.onLocatorChanged,
     this.onPreferencesChanged,
     this.onBack,
+    this.onAnnotate,
+    this.onNote,
+    this.onEditHighlight,
+    this.onRemoveHighlight,
+    this.highlights = const [],
     this.builders = const ReaderUiBuilders(),
     super.key,
   }) : assert(
@@ -55,6 +61,11 @@ final class PapyrusReader extends StatefulWidget {
   final ReaderLocatorChanged? onLocatorChanged;
   final ReaderPreferencesChanged? onPreferencesChanged;
   final VoidCallback? onBack;
+  final ValueChanged<ReaderSelection>? onAnnotate;
+  final ValueChanged<ReaderSelection>? onNote;
+  final ValueChanged<ReaderHighlight>? onEditHighlight;
+  final ValueChanged<ReaderHighlight>? onRemoveHighlight;
+  final List<ReaderHighlight> highlights;
   final ReaderUiBuilders builders;
 
   @override
@@ -66,7 +77,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
   late bool _ownsController;
   ReaderSnapshot? _observedSnapshot;
   _ReaderPanel _panel = _ReaderPanel.none;
-  bool _controlsVisible = true;
+  bool _controlsVisible = false;
   double? _dragProgress;
   int _loadGeneration = 0;
   bool _loadedDependencies = false;
@@ -132,7 +143,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
 
     if (controllerChanged || documentChanged) {
       _panel = _ReaderPanel.none;
-      _controlsVisible = true;
+      _controlsVisible = false;
       _dragProgress = null;
       _loadDocument();
     }
@@ -352,10 +363,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
   Widget build(BuildContext context) {
     _scheduleActivityReport();
     final snapshot = _controller.snapshot;
-    final ambient = Theme.of(context);
-    final readerTheme = snapshot.status == ReaderStatus.ready
-        ? buildReaderMaterialTheme(ambient, snapshot.preferences.brightness)
-        : ambient;
+    final readerTheme = Theme.of(context);
     final theme = widget.theme ?? ReaderThemeData.fromTheme(readerTheme);
     return Theme(
       data: readerTheme,
@@ -523,25 +531,22 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final isWide = constraints.maxWidth >= theme.compactBreakpoint;
-        final toolbar = widget.builders.toolbar?.call(
-          context,
-          ReaderToolbarContext(
-            document: widget.document,
-            snapshot: snapshot,
-            onBack: widget.onBack,
-            isBusy: _isCommandBusy,
-            toggleControls: _toggleControls,
-            controlsVisible: _controlsVisible,
-            openTableOfContents: () => _openPanel(
-              context,
-              _ReaderPanel.tableOfContents,
-              isWide,
-              theme,
-            ),
-            openSettings: () =>
-                _openPanel(context, _ReaderPanel.settings, isWide, theme),
-          ),
+        final toolbarContext = ReaderToolbarContext(
+          document: widget.document,
+          snapshot: snapshot,
+          onBack: widget.onBack,
+          isBusy: _isCommandBusy,
+          toggleControls: _toggleControls,
+          controlsVisible: _controlsVisible,
+          openTableOfContents: () =>
+              _openPanel(context, _ReaderPanel.tableOfContents, isWide, theme),
+          openSettings: () =>
+              _openPanel(context, _ReaderPanel.settings, isWide, theme),
         );
+        final toolbar = widget.builders.toolbar?.call(context, toolbarContext);
+        final actions =
+            widget.builders.toolbarActions?.call(context, toolbarContext) ??
+            const <Widget>[];
 
         return CallbackShortcuts(
           bindings: _keyBindings,
@@ -590,6 +595,9 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
                             ),
                           ),
                         ),
+                        border: Border(
+                          top: BorderSide(color: theme.dividerColor),
+                        ),
                       ),
                     ),
                   ),
@@ -608,6 +616,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
                                   toolbar ??
                                       ReaderToolbar(
                                         document: widget.document,
+                                        actions: actions,
                                         onBack: widget.onBack,
                                         onTableOfContents: () => _openPanel(
                                           context,
@@ -633,6 +642,9 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
                                       minHeight: 2,
                                     ),
                                 ],
+                              ),
+                              border: Border(
+                                bottom: BorderSide(color: theme.dividerColor),
                               ),
                             ),
                           ),
@@ -671,9 +683,6 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
                                           decoration: BoxDecoration(
                                             border: BorderDirectional(
                                               start: BorderSide(
-                                                color: theme.dividerColor,
-                                              ),
-                                              top: BorderSide(
                                                 color: theme.dividerColor,
                                               ),
                                             ),
@@ -722,8 +731,16 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
     child: child,
   );
 
-  Widget _overlayBar(ReaderThemeData theme, Widget child) =>
-      Material(color: theme.chromeColor, elevation: 0, child: child);
+  Widget _overlayBar(ReaderThemeData theme, Widget child, {Border? border}) =>
+      Material(
+        color: theme.chromeColor,
+        elevation: 0,
+        child: DecoratedBox(
+          position: DecorationPosition.foreground,
+          decoration: BoxDecoration(border: border),
+          child: child,
+        ),
+      );
 
   Widget _readingSurface(
     BuildContext context,
@@ -742,9 +759,22 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
       },
       child: ReaderSurface(
         enabled: _panel == _ReaderPanel.none && _compactPanelRoute == null,
+        onAnnotate: widget.onAnnotate,
+        onNote: widget.onNote,
+        onEditHighlight: widget.onEditHighlight,
+        onRemoveHighlight: widget.onRemoveHighlight,
+        highlights: widget.highlights,
         onToggle: _toggleControls,
         onTurn: (direction) => direction > 0 ? _goNext() : _goPrevious(),
-        child: _buildViewport(context, snapshot),
+        child: Theme(
+          data: buildReaderMaterialTheme(
+            Theme.of(context),
+            snapshot.preferences.brightness,
+          ),
+          child: Builder(
+            builder: (context) => _buildViewport(context, snapshot),
+          ),
+        ),
       ),
     );
   }
@@ -886,13 +916,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
             ),
             builder: (sheetContext) {
               Widget buildPanel() {
-                // Captured route themes are a snapshot. Appearance can change while
-                // this sheet is open, so use the current reader theme on every update.
-                final preferences = _controller.preferences;
-                final currentTheme = buildReaderMaterialTheme(
-                  Theme.of(this.context),
-                  preferences.brightness,
-                );
+                final currentTheme = Theme.of(this.context);
                 final colors = currentTheme.colorScheme;
                 final panelTheme =
                     widget.theme ?? ReaderThemeData.fromTheme(currentTheme);
@@ -991,6 +1015,29 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
       controller: _controller,
       close: close,
       isBusy: _isCommandBusy,
+      showHeader: showHeader,
+      navigate: (locator) {
+        close();
+        _enqueueCommand(
+          (controller) => controller.goTo(locator),
+          context: 'while navigating to a saved location',
+        );
+      },
+      buildContents: (context) => ReaderContentsPanel(
+        showHeader: false,
+        scrollController: scrollController,
+        snapshot: snapshot,
+        close: close,
+        theme: theme,
+        enabled: !_isCommandBusy,
+        onNavigate: (locator) {
+          close();
+          _enqueueCommand(
+            (controller) => controller.goTo(locator),
+            context: 'while navigating from contents',
+          );
+        },
+      ),
     );
 
     return switch (panel) {

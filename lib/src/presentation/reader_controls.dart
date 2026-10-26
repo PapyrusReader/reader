@@ -77,6 +77,7 @@ final class ReaderToolbar extends StatelessWidget {
     required this.settingsFocusNode,
     required this.theme,
     required this.isWide,
+    this.actions = const [],
   });
 
   final ReaderDocument document;
@@ -87,6 +88,7 @@ final class ReaderToolbar extends StatelessWidget {
   final FocusNode settingsFocusNode;
   final ReaderThemeData theme;
   final bool isWide;
+  final List<Widget> actions;
 
   @override
   Widget build(BuildContext context) {
@@ -104,6 +106,7 @@ final class ReaderToolbar extends StatelessWidget {
         scrolledUnderElevation: 0,
         leading: onBack == null ? null : BackButton(onPressed: onBack),
         actions: [
+          ...actions,
           ReaderIconButton(
             key: const ValueKey('reader-toc-button'),
             focusNode: tocFocusNode,

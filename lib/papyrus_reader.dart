@@ -6,6 +6,7 @@ export 'src/domain/reader_activity.dart';
 export 'src/domain/reader_document.dart';
 export 'src/domain/reader_exception.dart';
 export 'src/domain/reader_locator.dart';
+export 'src/domain/reader_selection.dart';
 export 'src/domain/reader_preferences.dart';
 export 'src/domain/reader_snapshot.dart';
 export 'src/domain/reader_toc_entry.dart';

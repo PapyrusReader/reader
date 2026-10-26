@@ -23,9 +23,9 @@ final class ReaderThemeData {
     final colors = theme.colorScheme;
 
     return ReaderThemeData(
-      chromeColor: colors.surfaceContainer,
+      chromeColor: colors.surface,
       surfaceColor: colors.surface,
-      panelColor: colors.surfaceContainerHigh,
+      panelColor: colors.surface,
       accentColor: colors.primary,
       progressColor: colors.primary,
       handleColor: colors.primary,

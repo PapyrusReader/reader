@@ -4,6 +4,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/widgets.dart';
 
 import 'reader_interaction_scope.dart';
+import '../domain/reader_selection.dart';
 
 /// Observe taps without competing with selection or the viewport's drag arena.
 final class ReaderSurface extends StatefulWidget {
@@ -12,6 +13,11 @@ final class ReaderSurface extends StatefulWidget {
     required this.onToggle,
     required this.onTurn,
     required this.child,
+    this.onAnnotate,
+    this.onNote,
+    this.onEditHighlight,
+    this.onRemoveHighlight,
+    this.highlights = const [],
     super.key,
   });
 
@@ -19,6 +25,11 @@ final class ReaderSurface extends StatefulWidget {
   final VoidCallback onToggle;
   final ValueChanged<int> onTurn;
   final Widget child;
+  final ValueChanged<ReaderSelection>? onAnnotate;
+  final ValueChanged<ReaderSelection>? onNote;
+  final ValueChanged<ReaderHighlight>? onEditHighlight;
+  final ValueChanged<ReaderHighlight>? onRemoveHighlight;
+  final List<ReaderHighlight> highlights;
 
   @override
   State<ReaderSurface> createState() => _ReaderSurfaceState();
@@ -44,6 +55,11 @@ final class _ReaderSurfaceState extends State<ReaderSurface> {
   @override
   Widget build(BuildContext context) => ReaderInteractionScope(
     onTurn: widget.onTurn,
+    onAnnotate: widget.onAnnotate,
+    onNote: widget.onNote,
+    onEditHighlight: widget.onEditHighlight,
+    onRemoveHighlight: widget.onRemoveHighlight,
+    highlights: widget.highlights,
     onSelectionChanged: (selected) {
       if (selected || _selection) {
         _cancelled = true;
