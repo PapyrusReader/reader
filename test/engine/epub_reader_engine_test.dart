@@ -50,6 +50,21 @@ void main() {
       final locator = await engine.currentLocator() as EpubReaderLocator;
       expect(locator.spineIndex, 1);
       expect(locator.textOffset, greaterThan(0));
+      final section =
+          engine.snapshot.toc.first.children.single.locator
+              as EpubReaderLocator;
+      expect(section.textOffset, locator.textOffset);
+      expect(section.localProgression, greaterThan(0));
+      final chapter = engine.snapshot.toc.first.locator as EpubReaderLocator;
+      expect(chapter.spineIndex, 0);
+      expect(chapter.textOffset, 0);
+      expect(chapter.localProgression, 0);
+      await engine.goPrevious();
+      expect(
+        (engine.snapshot.toc.first.children.single.locator as EpubReaderLocator)
+            .textOffset,
+        section.textOffset,
+      );
     });
     test(
       'lazily loads a valid EPUB and builds nested table of contents',

@@ -200,6 +200,9 @@ final class EpubReaderEngine extends ReaderEngine {
     ];
     _anchors = (chapter['anchors'] as Map).cast<String, int>();
     _contentLength = chapter['length'] as int;
+    _toc = [
+      for (final entry in _toc) _resolveTocEntry(entry, target.spineIndex),
+    ];
     final offset = target.anchor == null
         ? target.textOffset
         : _anchors[target.anchor] ?? target.textOffset;
@@ -212,6 +215,28 @@ final class EpubReaderEngine extends ReaderEngine {
     _contentRevision++;
     _pageCount = 0;
     _restorationRevision++;
+  }
+
+  ReaderTocEntry _resolveTocEntry(ReaderTocEntry entry, int spineIndex) {
+    final locator = entry.locator as EpubReaderLocator;
+    int? offset;
+    if (locator.spineIndex == spineIndex) {
+      offset = locator.anchor == null ? 0 : _anchors[locator.anchor];
+    }
+    return ReaderTocEntry(
+      title: entry.title,
+      locator: offset == null
+          ? locator
+          : _locatorFor(
+              spineIndex,
+              textOffset: offset,
+              local: _contentLength == 0 ? 0 : offset / _contentLength,
+              anchor: locator.anchor,
+            ),
+      children: [
+        for (final child in entry.children) _resolveTocEntry(child, spineIndex),
+      ],
+    );
   }
 
   void _requireCurrent(int generation) {
