@@ -3,11 +3,16 @@ import 'dart:math';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:pdfrx/pdfrx.dart';
 
 import '../../domain/reader_types.dart';
+import '../../domain/reader_selection.dart';
+import '../../domain/reader_locator.dart';
 import '../../presentation/reader_interaction_scope.dart';
+import '../../presentation/reader_swipe_tracker.dart';
+import '../../presentation/reader_highlight_interaction.dart';
+import 'pdf_selection_toolbar.dart';
 
 enum PdfFacadeError { invalid, encrypted }
 
@@ -182,8 +187,8 @@ final class _PdfrxFacade implements PdfFacade, DisposablePdfFacade {
   Object? _viewKey;
   int _viewerRevision = 0;
   DateTime? _lastWheelTurn;
-  Offset? _touchStart;
-  int _touchPointers = 0;
+  final _swipe = ReaderSwipeTracker();
+  bool _textSelected = false;
 
   @override
   final int pageCount;
@@ -266,6 +271,58 @@ final class _PdfrxFacade implements PdfFacade, DisposablePdfFacade {
     );
   }
 
+  Future<void> _saveSelection(
+    PdfTextSelectionDelegate delegate,
+    ValueChanged<ReaderSelection> action,
+  ) async {
+    final ranges = await delegate.getSelectedTextRanges();
+
+    if (_disposed || ranges.isEmpty) {
+      return;
+    }
+
+    final rectangles = <ReaderSelectionRect>[];
+
+    for (final range in ranges) {
+      final page = _controller.document.pages[range.pageNumber - 1];
+
+      for (final fragment in range.enumerateFragmentBoundingRects()) {
+        final bounds = fragment.bounds.toRect(page: page);
+        final rect = Rect.fromLTRB(
+          (bounds.left / page.width).clamp(0, 1),
+          (bounds.top / page.height).clamp(0, 1),
+          (bounds.right / page.width).clamp(0, 1),
+          (bounds.bottom / page.height).clamp(0, 1),
+        );
+        if (rect.isEmpty) continue;
+        rectangles.add(
+          ReaderSelectionRect(pageIndex: range.pageNumber - 1, rect: rect),
+        );
+      }
+    }
+
+    if (rectangles.isEmpty) return;
+
+    PdfReaderLocator at(int page, double offset) => PdfReaderLocator(
+      pageIndex: page,
+      pageOffset: offset,
+      totalProgression: pageCount <= 1 ? 0 : page / (pageCount - 1),
+    );
+
+    final selection = ReaderSelection(
+      text: ranges.map((range) => range.text).join('\n'),
+      start: at(ranges.first.pageNumber - 1, rectangles.first.rect.top),
+      end: at(ranges.last.pageNumber - 1, rectangles.last.rect.bottom),
+      rectangles: rectangles,
+    );
+
+    await delegate.clearTextSelection();
+
+    if (_disposed) return;
+
+    action(selection);
+  }
+
   @override
   Widget buildViewport(PdfViewportConfiguration configuration) {
     _configuration = configuration;
@@ -321,23 +378,21 @@ final class _PdfrxFacade implements PdfFacade, DisposablePdfFacade {
               });
               WidgetsBinding.instance.scheduleFrame();
             },
-            onPointerDown: (event) {
-              if (event.kind != PointerDeviceKind.touch) return;
-              _touchPointers++;
-              _touchStart = _touchPointers == 1 ? event.position : null;
-            },
+            onPointerDown: _swipe.start,
+            onPointerMove: _swipe.update,
+            onPointerCancel: _swipe.cancel,
             onPointerUp: (event) {
-              if (event.kind != PointerDeviceKind.touch) return;
-              final start = _touchStart;
-              _touchPointers = max(0, _touchPointers - 1);
-              _touchStart = null;
+              final offset = _swipe.end(event);
+
               if (configuration.layoutMode == ReaderLayoutMode.paginated &&
-                  start != null &&
+                  offset != null &&
                   !_restoring &&
                   _atFit &&
-                  (event.position.dx - start.dx).abs() > 70) {
-                final direction = event.position.dx < start.dx ? 1 : -1;
+                  offset.dx.abs() > 70 &&
+                  offset.dx.abs() > offset.dy.abs()) {
+                final direction = offset.dx < 0 ? 1 : -1;
                 final turn = ReaderInteractionScope.maybeOf(context)?.onTurn;
+
                 if (turn != null) {
                   turn(direction);
                 } else {
@@ -345,35 +400,102 @@ final class _PdfrxFacade implements PdfFacade, DisposablePdfFacade {
                 }
               }
             },
-            onPointerCancel: (_) {
-              _touchPointers = 0;
-              _touchStart = null;
-            },
-            child: PdfViewer(
-              _documentRef,
-              key: ValueKey(key),
-              controller: _controller,
-              initialPageNumber: _pageIndex + 1,
-              params: buildPdfViewerParams(
-                configuration,
-                viewportSize: size,
-                onTextSelectionChange: (selection) =>
-                    ReaderInteractionScope.maybeOf(
-                      context,
-                    )?.onSelectionChanged(selection.hasSelectedText),
-                currentPageIndex: () => _pageIndex,
-                onViewerReady: (_, _) async {
-                  if (_disposed || revision != _viewerRevision) return;
-                  try {
-                    await _restorePage();
-                  } finally {
-                    if (!_disposed && revision == _viewerRevision) {
-                      _restoring = false;
-                      _positionChanged();
-                    }
-                  }
-                },
-                onPageChanged: (_) => _positionChanged(),
+            child: ReaderHighlightInteraction(
+              isSelecting: () => _textSelected,
+              hitTest: (position) {
+                if (!_controller.isReady) return null;
+                final documentPosition = _controller.globalToDocument(position);
+                if (documentPosition == null) return null;
+                final target = pdfHighlightAt(
+                  documentPosition,
+                  _controller.layout.pageLayouts,
+                  ReaderInteractionScope.maybeOf(context)?.highlights ??
+                      const [],
+                );
+                if (target == null) return null;
+                final visible = target.bounds.intersect(
+                  _controller.visibleRect,
+                );
+                final topLeft = _controller.documentToGlobal(visible.topLeft);
+                final bottomRight = _controller.documentToGlobal(
+                  visible.bottomRight,
+                );
+                if (visible.isEmpty || topLeft == null || bottomRight == null) {
+                  return null;
+                }
+                return (
+                  highlight: target.highlight,
+                  bounds: Rect.fromPoints(topLeft, bottomRight),
+                );
+              },
+              child: PdfSelectionToolbar(
+                controller: _controller,
+                saveSelection: _saveSelection,
+                child: PdfViewer(
+                  _documentRef,
+                  key: ValueKey(key),
+                  controller: _controller,
+                  initialPageNumber: _pageIndex + 1,
+                  params: buildPdfViewerParams(
+                    configuration,
+                    viewportSize: size,
+                    customizeContextMenuItems: (params, items) {
+                      if (!params.textSelectionDelegate.hasSelectedText ||
+                          !params.textSelectionDelegate.isCopyAllowed) {
+                        return;
+                      }
+
+                      final interactions = ReaderInteractionScope.maybeOf(
+                        context,
+                      );
+
+                      for (final entry in [
+                        ('Annotate', interactions?.onAnnotate),
+                        ('Add note', interactions?.onNote),
+                      ]) {
+                        final action = entry.$2;
+
+                        if (action != null) {
+                          items.add(
+                            ContextMenuButtonItem(
+                              label: entry.$1,
+                              onPressed: () {
+                                params.dismissContextMenu();
+                                _saveSelection(
+                                  params.textSelectionDelegate,
+                                  action,
+                                );
+                              },
+                            ),
+                          );
+                        }
+                      }
+                    },
+                    highlights:
+                        ReaderInteractionScope.maybeOf(context)?.highlights ??
+                        const [],
+                    onTextSelectionChange: (selection) {
+                      _textSelected = selection.hasSelectedText;
+                      _swipe.selectionChanged(selection.hasSelectedText);
+                      ReaderInteractionScope.maybeOf(
+                        context,
+                      )?.onSelectionChanged(selection.hasSelectedText);
+                    },
+                    currentPageIndex: () => _pageIndex,
+                    onViewerReady: (_, _) async {
+                      if (_disposed || revision != _viewerRevision) return;
+                      try {
+                        await _restorePage();
+                      } finally {
+                        if (!_disposed && revision == _viewerRevision) {
+                          _restoring = false;
+                          _positionChanged();
+                        }
+                      }
+                    },
+                    onPageChanged: (_) => _positionChanged(),
+                  ),
+                ),
               ),
             ),
           ),
@@ -446,6 +568,31 @@ final class _PdfrxFacade implements PdfFacade, DisposablePdfFacade {
   return (contentVisible: contentVisible, pages: qualified);
 }
 
+ReaderHighlightTarget? pdfHighlightAt(
+  Offset position,
+  List<Rect> pages,
+  List<ReaderHighlight> highlights,
+) {
+  for (final highlight in highlights.reversed) {
+    for (final rectangle in highlight.selection.rectangles) {
+      final pageIndex = rectangle.pageIndex;
+      if (pageIndex < 0 || pageIndex >= pages.length) continue;
+      final page = pages[pageIndex];
+      final rect = rectangle.rect;
+      final bounds = Rect.fromLTRB(
+        page.left + rect.left * page.width,
+        page.top + rect.top * page.height,
+        page.left + rect.right * page.width,
+        page.top + rect.bottom * page.height,
+      );
+      if (bounds.contains(position)) {
+        return (highlight: highlight, bounds: bounds);
+      }
+    }
+  }
+  return null;
+}
+
 PdfViewerParams buildPdfViewerParams(
   PdfViewportConfiguration configuration, {
   PdfViewerReadyCallback? onViewerReady,
@@ -453,9 +600,34 @@ PdfViewerParams buildPdfViewerParams(
   ValueChanged<int>? onPageChanged,
   Size viewportSize = const Size(800, 600),
   int Function()? currentPageIndex,
+  PdfViewerContextMenuUpdateMenuItemsFunction? customizeContextMenuItems,
+  List<ReaderHighlight> highlights = const [],
 }) {
   final paginated = configuration.layoutMode == ReaderLayoutMode.paginated;
   return PdfViewerParams(
+    customizeContextMenuItems: customizeContextMenuItems,
+    pagePaintCallbacks: [
+      (canvas, pageRect, page) {
+        for (final highlight in highlights) {
+          for (final rectangle in highlight.selection.rectangles) {
+            if (rectangle.pageIndex != page.pageNumber - 1) {
+              continue;
+            }
+
+            final rect = rectangle.rect;
+            canvas.drawRect(
+              Rect.fromLTRB(
+                pageRect.left + rect.left * pageRect.width,
+                pageRect.top + rect.top * pageRect.height,
+                pageRect.left + rect.right * pageRect.width,
+                pageRect.top + rect.bottom * pageRect.height,
+              ),
+              Paint()..color = highlight.color.withValues(alpha: .35),
+            );
+          }
+        }
+      },
+    ],
     textSelectionParams: PdfTextSelectionParams(
       onTextSelectionChange: onTextSelectionChange,
     ),

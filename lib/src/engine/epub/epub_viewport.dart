@@ -3,10 +3,15 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import '../../domain/reader_selection.dart';
+import '../../domain/reader_locator.dart';
 
 import '../../domain/reader_types.dart';
 import '../../domain/reader_preferences.dart';
 import '../../presentation/reader_interaction_scope.dart';
+import '../../presentation/reader_swipe_tracker.dart';
+import '../../presentation/reader_highlight_interaction.dart';
+import '../../presentation/reader_text_toolbar.dart';
 import 'epub_reader_engine.dart';
 import 'epub_rich_layout.dart';
 import 'epub_content_renderer.dart';
@@ -39,13 +44,194 @@ final class _EpubViewportState extends State<EpubViewport> {
   int _restoration = -1;
   int _pageIndex = 0;
   int _columns = 1;
-  double _drag = 0;
+  final _swipe = ReaderSwipeTracker();
   int _startPage = 0;
   double _startScroll = 0;
   bool _restoring = false;
   bool _busy = false;
   Completer<void>? _layoutReady;
   List<double> _scrollOffsets = const [];
+  final _selectionKey = GlobalKey<SelectionAreaState>();
+  final _selectionMenuController = ContextMenuController();
+  int _menuRevision = 0;
+  String _selectedText = '';
+  Rect? _menuBounds;
+
+  Iterable<EpubSelectionFragmentState> get _fragments {
+    final fragments = <EpubSelectionFragmentState>[];
+    void visit(Element element) {
+      if (element is StatefulElement &&
+          element.state is EpubSelectionFragmentState) {
+        fragments.add(element.state as EpubSelectionFragmentState);
+      }
+      element.visitChildElements(visit);
+    }
+
+    _selectionKey.currentContext?.visitChildElements(visit);
+    return fragments;
+  }
+
+  Rect? _visibleBounds(Iterable<Rect> rectangles) {
+    final box = context.findRenderObject() as RenderBox;
+    final viewport = box.localToGlobal(Offset.zero) & box.size;
+    Rect? bounds;
+    for (final rectangle in rectangles) {
+      final visible = rectangle.intersect(viewport);
+      if (!visible.isEmpty) {
+        bounds = bounds?.expandToInclude(visible) ?? visible;
+      }
+    }
+    return bounds;
+  }
+
+  Rect? get _selectionBounds => _visibleBounds([
+    for (final fragment in _fragments)
+      if (fragment.range case final range?)
+        ...fragment.rectangles(range.startOffset, range.endOffset),
+  ]);
+
+  ReaderHighlightTarget? _highlightAt(Offset position) {
+    final highlights =
+        ReaderInteractionScope.maybeOf(context)?.highlights ??
+        const <ReaderHighlight>[];
+    for (final highlight in highlights.reversed) {
+      final start = highlight.selection.start;
+      final end = highlight.selection.end;
+      if (start is! EpubReaderLocator ||
+          end is! EpubReaderLocator ||
+          start.spineIndex != widget.engine.locator.spineIndex ||
+          start.textOffset == null ||
+          end.textOffset == null) {
+        continue;
+      }
+      final rectangles = [
+        for (final fragment in _fragments)
+          ...fragment.rectangles(
+            start.textOffset! - fragment.widget.fragment.offset,
+            end.textOffset! - fragment.widget.fragment.offset,
+          ),
+      ];
+      if (rectangles.any((rectangle) => rectangle.contains(position))) {
+        final bounds = _visibleBounds(rectangles);
+        if (bounds != null) return (highlight: highlight, bounds: bounds);
+      }
+    }
+    return null;
+  }
+
+  ReaderSelection? _selectedPassage() {
+    int? first;
+    int? last;
+
+    void visit(Element element) {
+      if (element is StatefulElement &&
+          element.state is EpubSelectionFragmentState) {
+        final state = element.state as EpubSelectionFragmentState;
+        final selection = state.range;
+
+        if (selection != null && selection.startOffset != selection.endOffset) {
+          final start =
+              state.widget.fragment.offset +
+              math.min(selection.startOffset, selection.endOffset);
+          final end =
+              state.widget.fragment.offset +
+              math.max(selection.startOffset, selection.endOffset);
+          first = first == null
+              ? start.toInt()
+              : math.min(first!, start).toInt();
+          last = last == null ? end.toInt() : math.max(last!, end).toInt();
+        }
+      }
+
+      element.visitChildElements(visit);
+    }
+
+    _selectionKey.currentContext?.visitChildElements(visit);
+
+    if (first == null || last == null || _selectedText.isEmpty) {
+      return null;
+    }
+
+    final locator = widget.engine.locator;
+    EpubReaderLocator at(int offset) => EpubReaderLocator(
+      spineIndex: locator.spineIndex,
+      textOffset: offset,
+      localProgression: (offset / math.max(1, widget.engine.contentLength))
+          .clamp(0, 1),
+      totalProgression: locator.totalProgression,
+    );
+
+    return ReaderSelection(
+      text: _selectedText,
+      start: at(first!),
+      end: at(last!),
+    );
+  }
+
+  Widget _selectionMenu(BuildContext context, SelectableRegionState state) {
+    final interactions = ReaderInteractionScope.maybeOf(this.context);
+    final items = <ContextMenuButtonItem>[];
+
+    void add(String label, ValueChanged<ReaderSelection>? action) {
+      if (_selectedText.isEmpty || action == null) {
+        return;
+      }
+
+      items.add(
+        ContextMenuButtonItem(
+          label: label,
+          onPressed: () {
+            final selection = _selectedPassage();
+            _selectionMenuController.remove();
+            state.hideToolbar();
+            state.clearSelection();
+            if (selection != null) action(selection);
+          },
+        ),
+      );
+    }
+
+    add('Annotate', interactions?.onAnnotate);
+    add('Add note', interactions?.onNote);
+    items.addAll(
+      state.contextMenuButtonItems.map(
+        (item) => ContextMenuButtonItem(
+          type: item.type,
+          label: item.label,
+          onPressed: () {
+            _selectionMenuController.remove();
+            item.onPressed?.call();
+          },
+        ),
+      ),
+    );
+    final bounds = _menuBounds;
+    if (bounds == null || items.isEmpty) return const SizedBox.shrink();
+    return ReaderTextToolbar(bounds: bounds, items: items);
+  }
+
+  void _selectionStatusChanged(SelectableRegionSelectionStatus status) {
+    final revision = ++_menuRevision;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || revision != _menuRevision) return;
+      _selectionMenuController.remove();
+      final state = _selectionKey.currentState?.selectableRegion;
+      if (status != SelectableRegionSelectionStatus.finalized ||
+          _selectedText.isEmpty ||
+          state == null) {
+        return;
+      }
+      _menuBounds = _selectionBounds;
+      _selectionMenuController.show(
+        context: context,
+        contextMenuBuilder: (context) => TapRegion(
+          groupId: SelectableRegion,
+          child: _selectionMenu(context, state),
+        ),
+      );
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
 
   @override
   void initState() {
@@ -410,6 +596,7 @@ final class _EpubViewportState extends State<EpubViewport> {
     PaintingBinding.instance.systemFonts.removeListener(_fontsChanged);
     widget.engine.moveWithinChapter = null;
     widget.engine.prepareChapter = null;
+    _selectionMenuController.remove();
     _pagesController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -640,55 +827,89 @@ final class _EpubViewportState extends State<EpubViewport> {
                       ),
                     );
                   }
-                  // Pointer tracking does not claim the gesture arena from text
-                  // selection, links or scrolling. Only a drag past a boundary turns.
-                  final surface = Listener(
-                    onPointerDown: (_) {
-                      _drag = 0;
-                      _startPage = _pageIndex;
-                      _startScroll = _scrollController.hasClients
-                          ? _scrollController.offset
-                          : 0;
-                    },
-                    onPointerMove: (event) => _drag +=
-                        displayPreferences.layoutMode == ReaderLayoutMode.scroll
-                        ? event.delta.dy
-                        : event.delta.dx,
-                    onPointerUp: (_) {
-                      if (_drag.abs() < 70) return;
-                      if (displayPreferences.layoutMode ==
-                              ReaderLayoutMode.scroll &&
-                          _scrollController.hasClients) {
-                        final p = _scrollController.position;
-                        if (_drag < 0 &&
-                            _startScroll >= p.maxScrollExtent - 1) {
-                          _beyondChapter(1);
+                  final surface = ReaderHighlightInteraction(
+                    hitTest: _highlightAt,
+                    isSelecting: () => _selectedText.isNotEmpty,
+                    child: Listener(
+                      onPointerDown: (event) {
+                        _swipe.start(event);
+                        _startPage = _pageIndex;
+                        _startScroll = _scrollController.hasClients
+                            ? _scrollController.offset
+                            : 0;
+                      },
+                      onPointerMove: _swipe.update,
+                      onPointerCancel: _swipe.cancel,
+                      onPointerUp: (event) {
+                        final offset = _swipe.end(event);
+
+                        if (offset == null) {
+                          return;
                         }
-                        if (_drag > 0 && _startScroll <= 1) _beyondChapter(-1);
-                      } else {
-                        if (_drag < 0 &&
-                            _startPage == (pages.length / columns).ceil() - 1) {
-                          _beyondChapter(1);
+
+                        final scrolling =
+                            displayPreferences.layoutMode ==
+                            ReaderLayoutMode.scroll;
+                        final drag = scrolling ? offset.dy : offset.dx;
+                        final crossAxis = scrolling ? offset.dx : offset.dy;
+
+                        if (drag.abs() < 70 || drag.abs() <= crossAxis.abs()) {
+                          return;
                         }
-                        if (_drag > 0 && _startPage == 0) _beyondChapter(-1);
-                      }
-                    },
-                    child:
-                        Localizations.of<MaterialLocalizations>(
-                              context,
-                              MaterialLocalizations,
-                            ) ==
-                            null
-                        ? content
-                        : SelectionArea(
-                            onSelectionChanged: (selection) =>
+
+                        if (scrolling && _scrollController.hasClients) {
+                          final position = _scrollController.position;
+
+                          if (drag < 0 &&
+                              _startScroll >= position.maxScrollExtent - 1) {
+                            _beyondChapter(1);
+                          }
+
+                          if (drag > 0 && _startScroll <= 1) {
+                            _beyondChapter(-1);
+                          }
+                        } else {
+                          if (drag < 0 &&
+                              _startPage ==
+                                  (pages.length / columns).ceil() - 1) {
+                            _beyondChapter(1);
+                          }
+
+                          if (drag > 0 && _startPage == 0) {
+                            _beyondChapter(-1);
+                          }
+                        }
+                      },
+                      child:
+                          Localizations.of<MaterialLocalizations>(
+                                context,
+                                MaterialLocalizations,
+                              ) ==
+                              null
+                          ? content
+                          : SelectionArea(
+                              key: _selectionKey,
+                              contextMenuBuilder: _selectionMenu,
+                              onSelectionChanged: (selection) {
+                                final selected =
+                                    selection?.plainText.isNotEmpty ?? false;
+                                _selectedText = selection?.plainText ?? '';
+                                if (!selected) {
+                                  _menuRevision++;
+                                  _menuBounds = null;
+                                  _selectionMenuController.remove();
+                                }
+                                _swipe.selectionChanged(selected);
                                 ReaderInteractionScope.maybeOf(
                                   context,
-                                )?.onSelectionChanged(
-                                  selection?.plainText.isNotEmpty ?? false,
-                                ),
-                            child: content,
-                          ),
+                                )?.onSelectionChanged(selected);
+                              },
+                              child: _SelectionStatusObserver(
+                                onChanged: _selectionStatusChanged,
+                                child: content,
+                              ),
+                            ),
+                    ),
                   );
                   return Stack(
                     fit: StackFit.expand,
@@ -738,11 +959,23 @@ final class _EpubViewportState extends State<EpubViewport> {
     ReaderPreferences preferences, {
     bool scroll = false,
   }) {
+    final highlights =
+        ReaderInteractionScope.maybeOf(context)?.highlights.where((highlight) {
+          final start = highlight.selection.start;
+          return start is EpubReaderLocator &&
+              start.spineIndex == widget.engine.locator.spineIndex;
+        }).toList() ??
+        const <ReaderHighlight>[];
+
     final children = [
       for (final fragment in page.fragments)
         Padding(
           padding: EdgeInsets.only(bottom: fragment.spacing(preferences)),
-          child: buildEpubFragment(fragment, preferences),
+          child: buildEpubFragment(
+            fragment,
+            preferences,
+            highlights: highlights,
+          ),
         ),
     ];
     return Padding(
@@ -775,4 +1008,44 @@ final class _EpubScrollDelegate extends SliverChildBuilderDelegate {
     double leadingScrollOffset,
     double trailingScrollOffset,
   ) => extent;
+}
+
+/// Observes selection completion without inserting a nested selection container.
+final class _SelectionStatusObserver extends StatefulWidget {
+  const _SelectionStatusObserver({
+    required this.onChanged,
+    required this.child,
+  });
+  final ValueChanged<SelectableRegionSelectionStatus> onChanged;
+  final Widget child;
+
+  @override
+  State<_SelectionStatusObserver> createState() =>
+      _SelectionStatusObserverState();
+}
+
+final class _SelectionStatusObserverState
+    extends State<_SelectionStatusObserver> {
+  ValueListenable<SelectableRegionSelectionStatus>? _status;
+
+  void _changed() => widget.onChanged(_status!.value);
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final status = SelectableRegionSelectionStatusScope.maybeOf(context);
+    if (identical(status, _status)) return;
+    _status?.removeListener(_changed);
+    _status = status;
+    _status?.addListener(_changed);
+  }
+
+  @override
+  void dispose() {
+    _status?.removeListener(_changed);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }

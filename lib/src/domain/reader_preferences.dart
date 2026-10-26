@@ -16,7 +16,7 @@ final class ReaderPreferences {
     this.foregroundColor = const Color(0xff1b1b1b),
     this.brightness = Brightness.light,
     this.layoutMode = ReaderLayoutMode.paginated,
-    this.columnMode = ReaderColumnMode.automatic,
+    this.columnMode = ReaderColumnMode.single,
   }) : assert(fontSize > 0),
        assert(lineHeight > 0),
        assert(paragraphSpacing >= 0);

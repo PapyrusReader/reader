@@ -5,6 +5,52 @@ import 'package:papyrus_reader/src/engine/epub/epub_rich_layout.dart';
 import 'package:papyrus_reader/src/engine/epub/worker/epub_content.dart';
 
 void main() {
+  test('saved text offsets highlight the same text across page fragments', () {
+    final block = EpubContentBlock({
+      'kind': 'p',
+      'offset': 20,
+      'length': 16,
+      'runs': [
+        {'text': 'Repeated passage'},
+      ],
+    });
+    final selection = ReaderSelection(
+      text: 'passage',
+      start: EpubReaderLocator(
+        spineIndex: 0,
+        textOffset: 29,
+        localProgression: 0,
+        totalProgression: 0,
+      ),
+      end: EpubReaderLocator(
+        spineIndex: 0,
+        textOffset: 36,
+        localProgression: 1,
+        totalProgression: 1,
+      ),
+    );
+    final highlight = ReaderHighlight(
+      id: 'saved',
+      selection: ReaderSelection.fromJson(selection.toJson()),
+      color: const Color(0xffffff00),
+    );
+    final full = block.span(const ReaderPreferences(), highlights: [highlight]);
+    expect(full.toPlainText(), 'Repeated passage');
+    expect((full.children!.last as TextSpan).text, 'passage');
+    expect((full.children!.last as TextSpan).style!.backgroundColor, isNotNull);
+    final fragment = block.span(
+      const ReaderPreferences(fontSize: 28),
+      start: 12,
+      end: 16,
+      highlights: [highlight],
+    );
+    expect(fragment.toPlainText(), 'sage');
+    expect(
+      (fragment.children!.single as TextSpan).style!.backgroundColor,
+      isNotNull,
+    );
+  });
+
   TestWidgetsFlutterBinding.ensureInitialized();
   testWidgets('measured fragments match the rendered Material reader text', (
     tester,

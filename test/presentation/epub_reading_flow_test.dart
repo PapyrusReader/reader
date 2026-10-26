@@ -34,6 +34,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
     await pumpReaderCommand(tester, engine.goNext());
     await tester.pumpAndSettle();
     await pumpReaderCommand(tester, engine.goNext());

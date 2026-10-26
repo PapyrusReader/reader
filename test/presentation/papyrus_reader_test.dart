@@ -60,6 +60,7 @@ void main() {
       ReaderPreferences? initialPreferences,
       ReaderThemeData? readerTheme,
       VoidCallback? onBack,
+      bool showControls = true,
     }) async {
       tester.view.physicalSize = size;
       tester.view.devicePixelRatio = 1;
@@ -101,7 +102,66 @@ void main() {
           ),
         ),
       );
+      if (showControls) {
+        await tester.pump();
+
+        if (controller.snapshot.status == ReaderStatus.ready) {
+          await toggleReaderControls(tester);
+        }
+      }
     }
+
+    testWidgets(
+      'books open with hidden controls and bordered overlays preserve the viewport',
+      (tester) async {
+        final controller = controllerFor([_UiReaderEngine()]);
+        addTearDown(controller.dispose);
+        await pumpReader(
+          tester,
+          document: document('Hidden controls'),
+          controller: controller,
+          showControls: false,
+        );
+        await tester.pumpAndSettle();
+        final viewport = find.byKey(const ValueKey('reader-viewport'));
+        final element = tester.element(viewport);
+        final bounds = tester.getRect(viewport);
+        final locator = controller.snapshot.locator;
+        expect(find.byTooltip('Reading settings'), findsNothing);
+        expect(find.byTooltip('Next'), findsNothing);
+        await toggleReaderControls(tester);
+        expect(
+          find.byTooltip('Reading settings').hitTestable(),
+          findsOneWidget,
+        );
+        expect(find.byTooltip('Next').hitTestable(), findsOneWidget);
+        final header = find.descendant(
+          of: find.byKey(const ValueKey('reader-toolbar')),
+          matching: find.byType(DecoratedBox),
+        );
+        final headerBorder =
+            (tester.widget<DecoratedBox>(header.first).decoration
+                        as BoxDecoration)
+                    .border!
+                as Border;
+        final footer = find.ancestor(
+          of: find.byTooltip('Next'),
+          matching: find.byType(DecoratedBox),
+        );
+        final footerBorder =
+            (tester.widget<DecoratedBox>(footer.first).decoration
+                        as BoxDecoration)
+                    .border!
+                as Border;
+        expect(headerBorder.bottom.style, BorderStyle.solid);
+        expect(footerBorder.top.style, BorderStyle.solid);
+        expect(tester.element(viewport), same(element));
+        expect(tester.getRect(viewport), bounds);
+        expect(controller.snapshot.locator, locator);
+        await toggleReaderControls(tester);
+        expect(find.byTooltip('Next'), findsNothing);
+      },
+    );
 
     testWidgets('custom snapshot viewports refresh without losing state', (
       tester,
@@ -332,17 +392,18 @@ void main() {
           await tester.pumpAndSettle();
           expect(find.byTooltip('Reading settings'), findsOneWidget);
           expect(find.byTooltip('Next'), findsOneWidget);
-          // Opening a different book must restore its exit/navigation controls.
+          // Opening a different book starts with controls hidden.
           await toggleReaderControls(tester);
           await tester.pumpAndSettle();
           await pumpReader(
             tester,
             document: document('Replacement'),
+            showControls: false,
             controller: controllerFor([_UiReaderEngine()]),
             size: Size(width, 844),
           );
           await tester.pumpAndSettle();
-          expect(find.byTooltip('Reading settings'), findsOneWidget);
+          expect(find.byTooltip('Reading settings'), findsNothing);
           final replacement = tester
               .widget<PapyrusReader>(find.byType(PapyrusReader))
               .controller!;
@@ -475,7 +536,7 @@ void main() {
       },
     );
 
-    testWidgets('all settings dropdown routes follow the reading appearance', (
+    testWidgets('all settings dropdown routes follow the app theme', (
       tester,
     ) async {
       for (final brightness in [Brightness.light, Brightness.dark]) {
@@ -497,15 +558,23 @@ void main() {
           for (final pair in [
             ('System', 'Monospace'),
             ('Paginated', 'Continuous scroll'),
-            ('Automatic', 'Double'),
+            ('Single', 'Double'),
           ]) {
             await tester.ensureVisible(find.text(pair.$1).first);
             await tester.tap(find.text(pair.$1).first);
             await tester.pumpAndSettle();
             final option = find.text(pair.$2).last;
             final menuTheme = Theme.of(tester.element(option));
-            expect(menuTheme.brightness, brightness);
-            expect(menuTheme.canvasColor, menuTheme.colorScheme.surface);
+            expect(
+              menuTheme.brightness,
+              brightness == Brightness.light
+                  ? Brightness.dark
+                  : Brightness.light,
+            );
+            expect(
+              menuTheme.canvasColor,
+              Theme.of(tester.element(find.byType(PapyrusReader))).canvasColor,
+            );
             final text = tester.widget<RichText>(
               find
                   .descendant(of: option, matching: find.byType(RichText))
@@ -528,7 +597,7 @@ void main() {
     });
 
     testWidgets(
-      'settings text follows reader appearance in opposite app themes',
+      'settings text follows the app theme with opposite reading appearances',
       (tester) async {
         for (final brightness in [Brightness.dark, Brightness.light]) {
           final engine = _UiReaderEngine();
@@ -549,18 +618,24 @@ void main() {
           await tester.pumpAndSettle();
           final label = find.text('Page appearance');
           final theme = Theme.of(tester.element(label));
-          expect(theme.brightness, brightness);
+          expect(
+            theme.brightness,
+            brightness == Brightness.light ? Brightness.dark : Brightness.light,
+          );
           final rich = tester.widget<RichText>(
             find.descendant(of: label, matching: find.byType(RichText)),
           );
-          expect(rich.text.style!.color, theme.colorScheme.onSurface);
+          expect(rich.text.style!.color, theme.textTheme.titleMedium!.color);
           final dropdown = find.text('Paginated');
           final dropdownText = tester.widget<RichText>(
             find
                 .descendant(of: dropdown, matching: find.byType(RichText))
                 .first,
           );
-          expect(dropdownText.text.style!.color, theme.colorScheme.onSurface);
+          expect(
+            dropdownText.text.style!.color,
+            theme.textTheme.titleMedium!.color,
+          );
           for (final chip in tester.widgetList<ChoiceChip>(
             find.byType(ChoiceChip),
           )) {
@@ -588,7 +663,7 @@ void main() {
     );
 
     testWidgets(
-      'an open mobile panel updates its theme when Night is selected',
+      'an open mobile panel retains the app theme when Night is selected',
       (tester) async {
         final engine = _UiReaderEngine();
         final controller = controllerFor([engine]);
@@ -607,11 +682,12 @@ void main() {
         await tester.pumpAndSettle();
         final label = find.text('Page appearance');
         final theme = Theme.of(tester.element(label));
-        expect(theme.brightness, Brightness.dark);
+        expect(theme.brightness, Brightness.light);
+        expect(controller.preferences.brightness, Brightness.dark);
         final rich = tester.widget<RichText>(
           find.descendant(of: label, matching: find.byType(RichText)),
         );
-        expect(rich.text.style!.color, theme.colorScheme.onSurface);
+        expect(rich.text.style!.color, theme.textTheme.titleMedium!.color);
         expect(tester.takeException(), isNull);
       },
     );
@@ -644,8 +720,9 @@ void main() {
 
       expect(find.byKey(const ValueKey('reader-viewport')), findsOneWidget);
       expect(find.text('The Loading Reader'), findsNothing);
-      expect(find.byTooltip('Reading settings'), findsOneWidget);
-      expect(find.byTooltip('Table of contents'), findsOneWidget);
+      expect(find.byTooltip('Reading settings'), findsNothing);
+      expect(find.byTooltip('Table of contents'), findsNothing);
+      await toggleReaderControls(tester);
       expect(find.byTooltip('Reading settings'), findsOneWidget);
     });
 
@@ -850,6 +927,7 @@ void main() {
             app(document('First sheet'), firstController),
           );
           await tester.pumpAndSettle();
+          await toggleReaderControls(tester);
           await tester.tap(find.byTooltip('Reading settings'));
           await tester.pumpAndSettle();
           expect(find.byType(BottomSheet), findsOneWidget);
@@ -861,7 +939,7 @@ void main() {
 
           expect(find.byType(BottomSheet), findsNothing);
           expect(find.text('The Second sheet Reader'), findsNothing);
-          expect(find.byTooltip('Reading settings'), findsOneWidget);
+          expect(find.byTooltip('Reading settings'), findsNothing);
           expect(secondController.snapshot.status, ReaderStatus.ready);
           expect(firstEngine.isDisposed, isFalse);
         },
@@ -901,6 +979,7 @@ void main() {
           );
           await tester.pumpAndSettle();
 
+          await toggleReaderControls(tester);
           await tester.tap(find.byTooltip('Reading settings'));
           updateHost(() => showReader = false);
           await tester.pumpAndSettle();
@@ -1337,6 +1416,7 @@ void main() {
       await pumpReader(
         tester,
         document: document('Retry'),
+        showControls: false,
         controller: controller,
         builders: ReaderUiBuilders(
           loading: (context, state) => const Text('Custom loading'),
@@ -1475,7 +1555,7 @@ void main() {
 
         expect(controller.snapshot.document!.id, 'Second');
         expect(find.text('The Second Reader'), findsNothing);
-        expect(find.byTooltip('Reading settings'), findsOneWidget);
+        expect(find.byTooltip('Reading settings'), findsNothing);
         expect(firstEngine.isDisposed, isTrue);
       },
     );

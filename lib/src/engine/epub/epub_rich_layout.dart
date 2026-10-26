@@ -2,8 +2,11 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
+import 'package:flutter/rendering.dart';
 
 import '../../domain/reader_preferences.dart';
+import '../../domain/reader_selection.dart';
+import '../../domain/reader_locator.dart';
 import '../../presentation/reader_interaction_scope.dart';
 
 final class EpubContentBlock {
@@ -49,7 +52,12 @@ final class EpubContentBlock {
     );
   }
 
-  TextSpan span(ReaderPreferences preferences, {int start = 0, int? end}) {
+  TextSpan span(
+    ReaderPreferences preferences, {
+    int start = 0,
+    int? end,
+    List<ReaderHighlight> highlights = const [],
+  }) {
     final children = <TextSpan>[];
     var position = 0;
     for (final run in runs) {
@@ -57,20 +65,58 @@ final class EpubContentBlock {
       final from = math.max(0, start - position);
       final to = math.min(text.length, (end ?? length) - position);
       if (to > from) {
-        children.add(
-          TextSpan(
-            text: text.substring(from, to),
-            style: TextStyle(
-              fontWeight: run['bold'] == true ? FontWeight.bold : null,
-              fontStyle: run['italic'] == true ? FontStyle.italic : null,
-              fontFamily: run['code'] == true ? 'monospace' : null,
-              decoration: TextDecoration.combine([
-                if (run['underline'] == true) TextDecoration.underline,
-                if (run['strike'] == true) TextDecoration.lineThrough,
-              ]),
+        final cuts = <int>{from, to};
+
+        for (final highlight in highlights) {
+          final first = highlight.selection.start;
+          final last = highlight.selection.end;
+
+          if (first is EpubReaderLocator &&
+              last is EpubReaderLocator &&
+              first.textOffset != null &&
+              last.textOffset != null) {
+            cuts.add((first.textOffset! - offset - position).clamp(from, to));
+            cuts.add((last.textOffset! - offset - position).clamp(from, to));
+          }
+        }
+
+        final boundaries = cuts.toList()..sort();
+
+        for (var index = 0; index < boundaries.length - 1; index++) {
+          final segmentStart = boundaries[index];
+          Color? background;
+
+          for (final highlight in highlights) {
+            final first = highlight.selection.start;
+            final last = highlight.selection.end;
+            final absolute = offset + position + segmentStart;
+
+            if (first is EpubReaderLocator &&
+                last is EpubReaderLocator &&
+                first.textOffset != null &&
+                last.textOffset != null &&
+                absolute >= first.textOffset! &&
+                absolute < last.textOffset!) {
+              background = highlight.color.withValues(alpha: .4);
+            }
+          }
+
+          children.add(
+            TextSpan(
+              text: text.substring(segmentStart, boundaries[index + 1]),
+              style: TextStyle(
+                backgroundColor: background,
+                fontWeight: run['bold'] == true ? FontWeight.bold : null,
+                fontStyle: run['italic'] == true ? FontStyle.italic : null,
+                fontFamily: run['code'] == true ? 'monospace' : null,
+                decoration: TextDecoration.combine([
+                  if (run['underline'] == true) TextDecoration.underline,
+                  if (run['strike'] == true) TextDecoration.lineThrough,
+                ]),
+              ),
             ),
-          ),
-        );
+          );
+        }
       }
       position += text.length;
     }
@@ -193,8 +239,9 @@ Future<List<EpubRichPage>> layoutEpubChapter(
 
 Widget buildEpubFragment(
   EpubPageFragment fragment,
-  ReaderPreferences preferences,
-) {
+  ReaderPreferences preferences, {
+  List<ReaderHighlight> highlights = const [],
+}) {
   final block = fragment.block;
   if (block.image != null) {
     return SizedBox(
@@ -212,8 +259,17 @@ Widget buildEpubFragment(
       ),
     );
   }
-  final text = Text.rich(
-    block.span(preferences, start: fragment.start, end: fragment.end),
+  final text = EpubSelectionFragment(
+    key: ValueKey(fragment.offset),
+    fragment: fragment,
+    child: Text.rich(
+      block.span(
+        preferences,
+        start: fragment.start,
+        end: fragment.end,
+        highlights: highlights,
+      ),
+    ),
   );
   if (!block.runs.any((run) => run['link'] == true)) {
     return text;
@@ -253,4 +309,87 @@ Widget buildEpubFragment(
       child: text,
     ),
   );
+}
+
+final class EpubSelectionFragment extends StatefulWidget {
+  const EpubSelectionFragment({
+    required this.fragment,
+    required this.child,
+    super.key,
+  });
+  final EpubPageFragment fragment;
+  final Widget child;
+
+  @override
+  State<EpubSelectionFragment> createState() => EpubSelectionFragmentState();
+}
+
+final class EpubSelectionFragmentState extends State<EpubSelectionFragment>
+    implements SelectionRegistrar {
+  final _selectables = <Selectable>{};
+  SelectionRegistrar? _parent;
+
+  SelectedContentRange? get range {
+    for (final selectable in _selectables) {
+      final selection = selectable.getSelection();
+      if (selection != null) return selection;
+    }
+    return null;
+  }
+
+  List<Rect> rectangles(int start, int end) {
+    RenderParagraph? paragraph;
+    void visit(RenderObject object) {
+      if (object is RenderParagraph) {
+        paragraph = object;
+      } else {
+        object.visitChildren(visit);
+      }
+    }
+
+    final object = context.findRenderObject();
+    if (object != null) visit(object);
+    final text = paragraph;
+    if (text == null || !text.attached) return const [];
+    final length = widget.fragment.end - widget.fragment.start;
+    final selection = TextSelection(
+      baseOffset: start.clamp(0, length),
+      extentOffset: end.clamp(0, length),
+    );
+    return [
+      for (final box in text.getBoxesForSelection(selection))
+        Rect.fromPoints(
+          text.localToGlobal(box.toRect().topLeft),
+          text.localToGlobal(box.toRect().bottomRight),
+        ),
+    ];
+  }
+
+  @override
+  void add(Selectable selectable) {
+    _selectables.add(selectable);
+    _parent?.add(selectable);
+  }
+
+  @override
+  void remove(Selectable selectable) {
+    _selectables.remove(selectable);
+    _parent?.remove(selectable);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final parent = SelectionContainer.maybeOf(context);
+    if (identical(parent, _parent)) return;
+    for (final selectable in _selectables) {
+      _parent?.remove(selectable);
+      parent?.add(selectable);
+    }
+    _parent = parent;
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      SelectionRegistrarScope(registrar: this, child: widget.child);
 }

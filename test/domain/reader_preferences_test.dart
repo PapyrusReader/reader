@@ -12,7 +12,7 @@ void main() {
       expect(preferences.pageMargins, const EdgeInsets.all(24));
       expect(preferences.brightness, Brightness.light);
       expect(preferences.layoutMode, ReaderLayoutMode.paginated);
-      expect(preferences.columnMode, ReaderColumnMode.automatic);
+      expect(preferences.columnMode, ReaderColumnMode.single);
     });
 
     test('copyWith changes selected values and preserves the rest', () {

@@ -2,6 +2,7 @@ import 'package:flutter/widgets.dart';
 
 import '../controller/reader_controller.dart';
 import '../domain/reader_document.dart';
+import '../domain/reader_locator.dart';
 import '../domain/reader_snapshot.dart';
 
 typedef ReaderToolbarBuilder =
@@ -50,7 +51,7 @@ final class ReaderToolbarContext {
     this.onBack,
     this.isBusy = false,
     this.toggleControls,
-    this.controlsVisible = true,
+    this.controlsVisible = false,
   });
 
   final ReaderDocument document;
@@ -71,8 +72,14 @@ final class ReaderPanelContext {
     required this.controller,
     required this.close,
     this.isBusy = false,
+    this.showHeader = true,
+    this.buildContents,
+    this.navigate,
   });
 
+  final bool showHeader;
+  final WidgetBuilder? buildContents;
+  final ValueChanged<ReaderLocator>? navigate;
   final ReaderSnapshot snapshot;
   final ReaderController controller;
   final VoidCallback close;
@@ -108,6 +115,7 @@ final class ReaderViewportContext {
 final class ReaderUiBuilders {
   const ReaderUiBuilders({
     this.toolbar,
+    this.toolbarActions,
     this.compactPanelRoute,
     this.tableOfContents,
     this.settings,
@@ -118,6 +126,8 @@ final class ReaderUiBuilders {
   });
 
   final ReaderToolbarBuilder? toolbar;
+  final List<Widget> Function(BuildContext context, ReaderToolbarContext state)?
+  toolbarActions;
 
   /// Overrides compact panel presentation; wide side panels are unchanged.
   final ReaderPanelRouteBuilder? compactPanelRoute;
