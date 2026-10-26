@@ -10,17 +10,19 @@ import 'package:papyrus_reader/src/engine/pdf/pdf_facade.dart';
 import 'package:papyrus_reader/src/presentation/reader_interaction_scope.dart';
 import 'package:pdfrx/pdfrx.dart';
 
+import '../support/pdfium_test_setup.dart';
+
 void main() {
   for (final layout in ReaderLayoutMode.values) {
     testWidgets(
       'PDF mouse drag opens annotation toolbar in $layout',
       (tester) async {
         final facade = await tester.runAsync(() async {
-          await pdfrxInitialize();
+          await initializePdfiumForTest();
           return createPdfrxFacade(
             _pdfBytes(),
             sourceName: 'selection-$layout',
-          );
+          ).timeout(const Duration(seconds: 15));
         });
         addTearDown(() => (facade as DisposablePdfFacade).dispose());
         ReaderSelection? annotated;
@@ -85,7 +87,9 @@ void main() {
 
         expect(controller.isReady, isTrue);
         final page = controller.document.pages.first;
-        final text = (await tester.runAsync(page.loadText))!;
+        final text = (await tester.runAsync(
+          () => page.loadText().timeout(const Duration(seconds: 15)),
+        ))!;
         final pageRect = controller.layout.pageLayouts.first;
         Offset character(int index) => controller.documentToGlobal(
           text.charRects[index].center.toOffsetInDocument(
@@ -176,6 +180,7 @@ void main() {
         expect(tester.takeException(), isNull);
       },
       skip: kIsWeb,
+      timeout: const Timeout(Duration(minutes: 1)),
     ); // Browser PDFium is checked through the example asset server.
   }
 }
