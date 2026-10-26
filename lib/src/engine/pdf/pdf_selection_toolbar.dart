@@ -55,6 +55,14 @@ final class _PdfSelectionToolbarState extends State<PdfSelectionToolbar> {
     _menu.remove();
   }
 
+  KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
+    if (_menu.isShown && event.logicalKey == LogicalKeyboardKey.escape) {
+      _dismiss();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
   void _scheduleMenu() {
     final revision = ++_revision;
     WidgetsBinding.instance.addPostFrameCallback((_) => _show(revision));
@@ -142,14 +150,7 @@ final class _PdfSelectionToolbarState extends State<PdfSelectionToolbar> {
       contextMenuBuilder: (_) => TapRegion(
         onTapOutside: (_) => _dismiss(),
         child: Focus(
-          autofocus: true,
-          onKeyEvent: (_, event) {
-            if (event.logicalKey == LogicalKeyboardKey.escape) {
-              _dismiss();
-              return KeyEventResult.handled;
-            }
-            return KeyEventResult.ignored;
-          },
+          onKeyEvent: _onKeyEvent,
           child: ReaderTextToolbar(bounds: menuBounds, items: items),
         ),
       ),
@@ -184,6 +185,6 @@ final class _PdfSelectionToolbarState extends State<PdfSelectionToolbar> {
       _dismiss();
     },
     onPointerSignal: (_) => _dismiss(),
-    child: widget.child,
+    child: Focus(onKeyEvent: _onKeyEvent, child: widget.child),
   );
 }

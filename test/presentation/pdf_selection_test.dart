@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:papyrus_reader/papyrus_reader.dart';
 import 'package:papyrus_reader/src/engine/pdf/pdf_facade.dart';
@@ -24,6 +25,23 @@ void main() {
         addTearDown(() => (facade as DisposablePdfFacade).dispose());
         ReaderSelection? annotated;
         var turns = 0;
+        var keyboardTurns = 0;
+        final copied = <String>[];
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          (call) async {
+            if (call.method == 'Clipboard.setData') {
+              copied.add((call.arguments as Map)['text'] as String);
+            }
+            return null;
+          },
+        );
+        addTearDown(
+          () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+            SystemChannels.platform,
+            null,
+          ),
+        );
         final configuration = PdfViewportConfiguration(
           pageIndex: 0,
           facingPages: false,
@@ -41,8 +59,14 @@ void main() {
                 onSelectionChanged: (_) {},
                 suppressTap: () {},
                 onAnnotate: (selection) => annotated = selection,
-                child: Builder(
-                  builder: (context) => facade!.buildViewport(configuration),
+                child: CallbackShortcuts(
+                  bindings: {
+                    const SingleActivator(LogicalKeyboardKey.pageDown): () =>
+                        keyboardTurns++,
+                  },
+                  child: Builder(
+                    builder: (context) => facade!.buildViewport(configuration),
+                  ),
                 ),
               ),
             ),
@@ -79,6 +103,7 @@ void main() {
         await mouse.moveTo(end);
         await tester.pump(const Duration(milliseconds: 50));
         expect(find.text('Annotate'), findsNothing);
+        final selectionFocus = FocusManager.instance.primaryFocus;
         await mouse.up();
 
         for (
@@ -99,6 +124,24 @@ void main() {
         final toolbar = tester.getRect(find.text('Annotate'));
         expect(toolbar.bottom, lessThan(start.dy));
         expect(turns, 0);
+        await tester.pump();
+        expect(FocusManager.instance.primaryFocus, same(selectionFocus));
+
+        for (final modifier in [
+          LogicalKeyboardKey.controlLeft,
+          LogicalKeyboardKey.metaLeft,
+        ]) {
+          await tester.sendKeyDownEvent(modifier);
+          await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+          await tester.sendKeyUpEvent(modifier);
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 20)),
+          );
+        }
+
+        expect(copied, contains(contains('Selection')));
+        await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
+        expect(keyboardTurns, 1);
         await tester.tap(find.text('Annotate'));
         await tester.pump();
         await tester.runAsync(
@@ -110,6 +153,23 @@ void main() {
         expect(annotated!.rectangles, isNotEmpty);
         expect((annotated!.start as PdfReaderLocator).pageIndex, 0);
         expect(controller.textSelectionDelegate.hasSelectedText, isFalse);
+        expect(find.text('Annotate'), findsNothing);
+
+        await mouse.down(start);
+        await mouse.moveTo(end);
+        await tester.pump(const Duration(milliseconds: 50));
+        await mouse.up();
+
+        for (var frame = 0; frame < 10; frame++) {
+          await tester.pump(const Duration(milliseconds: 50));
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 10)),
+          );
+        }
+
+        expect(find.text('Annotate'), findsOneWidget);
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pump();
         expect(find.text('Annotate'), findsNothing);
         await mouse.removePointer();
         await tester.pumpWidget(const SizedBox.shrink());
