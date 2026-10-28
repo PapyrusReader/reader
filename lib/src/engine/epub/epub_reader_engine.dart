@@ -45,9 +45,13 @@ final class EpubReaderEngine extends ReaderEngine {
   int _documentRevision = 0;
   EpubProgressIndex? _progressIndex;
   final Map<int, Map<String, Object?>> _chapterCache = {};
+  final Map<int, Future<Map<String, Object?>>> _chapterRequests = {};
   ReaderReadySnapshot? _displayed;
-  Future<void> Function(int index, List<EpubContentBlock> blocks)?
-  prepareChapter;
+  Future<void> Function(
+    EpubReaderLocator target,
+    List<EpubContentBlock> blocks,
+  )?
+  prepareLocation;
   Future<void> _turnQueue = Future<void>.value();
   int _contentLength = 0;
   int _restorationRevision = 0;
@@ -56,14 +60,15 @@ final class EpubReaderEngine extends ReaderEngine {
   bool _disposed = false;
   int _visiblePage = 1;
   int _pageCount = 0;
+  bool _pageCountEstimated = false;
   List<ReaderContentCoverage> _coverage = const [];
   bool _viewportReady = false;
   bool _atEnd = false;
   bool _batchingViewport = false;
 
-  /// The mounted viewport handles local page/scroll turns. The engine crosses
-  /// the spine only when that viewport reports a boundary.
-  Future<bool> Function(int direction)? moveWithinChapter;
+  /// The viewport owns page turns, including transitions across spine items.
+  /// The engine handles boundaries when no paginated viewport is mounted.
+  Future<bool> Function(int direction)? moveViewport;
 
   String get currentChapterHtml => _currentChapterHtml;
   List<EpubContentBlock> get blocks => _blocks;
@@ -133,6 +138,10 @@ final class EpubReaderEngine extends ReaderEngine {
         (metadata['lengths'] as List?)?.cast<int>() ?? List.filled(count, 1),
       );
       _chapterCache.clear();
+      _chapterRequests.clear();
+      if ((chapter['html'] as String).length <= 4 * 1024 * 1024) {
+        _chapterCache[target.spineIndex] = chapter;
+      }
       _displayed = null;
       _toc = [
         for (final entry in metadata['toc'] as List)
@@ -194,10 +203,7 @@ final class EpubReaderEngine extends ReaderEngine {
     _viewportReady = false;
     _atEnd = false;
     _currentChapterHtml = chapter['html'] as String;
-    _blocks = [
-      for (final block in chapter['blocks'] as List)
-        EpubContentBlock(Map<String, Object?>.from(block as Map)),
-    ];
+    _blocks = EpubContentBlocks(chapter['blocks'] as List);
     _anchors = (chapter['anchors'] as Map).cast<String, int>();
     _contentLength = chapter['length'] as int;
     _toc = [
@@ -263,11 +269,14 @@ final class EpubReaderEngine extends ReaderEngine {
       final offset = locator.anchor == null
           ? locator.textOffset
           : _anchors[locator.anchor] ?? locator.textOffset;
-      _locator = _locatorFor(
+      final target = _locatorFor(
         locator.spineIndex,
         local: locator.localProgression,
         textOffset: offset?.clamp(0, _contentLength),
       );
+      await prepareLocation?.call(target, _blocks);
+      _requireCurrent(generation);
+      _locator = target;
       _coverage = const [];
       _viewportReady = false;
       _atEnd = false;
@@ -275,10 +284,17 @@ final class EpubReaderEngine extends ReaderEngine {
     } else {
       final chapter = await chapterContent(locator.spineIndex);
       _requireCurrent(generation);
-      await prepareChapter?.call(locator.spineIndex, [
-        for (final block in chapter['blocks'] as List)
-          EpubContentBlock(Map<String, Object?>.from(block as Map)),
-      ]);
+      await prepareLocation?.call(
+        _locatorFor(
+          locator.spineIndex,
+          local: locator.localProgression,
+          textOffset: locator.anchor == null
+              ? locator.textOffset
+              : (chapter['anchors'] as Map)[locator.anchor] as int? ??
+                    locator.textOffset,
+        ),
+        EpubContentBlocks(chapter['blocks'] as List),
+      );
       _requireCurrent(generation);
       _setChapter(chapter, locator);
     }
@@ -329,6 +345,25 @@ final class EpubReaderEngine extends ReaderEngine {
       return cached;
     }
 
+    final pending = _chapterRequests[index];
+
+    if (pending != null) {
+      return pending;
+    }
+
+    final request = _readChapter(index);
+    _chapterRequests[index] = request;
+
+    try {
+      return await request;
+    } finally {
+      if (identical(_chapterRequests[index], request)) {
+        _chapterRequests.remove(index);
+      }
+    }
+  }
+
+  Future<Map<String, Object?>> _readChapter(int index) async {
     final worker = _worker!;
     final chapter = await worker.chapter(index);
 
@@ -360,7 +395,7 @@ final class EpubReaderEngine extends ReaderEngine {
         'No EPUB document is loaded.',
       );
     }
-    if (await moveWithinChapter?.call(direction) ?? false) return;
+    if (await moveViewport?.call(direction) ?? false) return;
     final index = _locator!.spineIndex + direction;
     if (index < 0 || index >= _chapterCount) {
       throw const ReaderException(
@@ -376,12 +411,14 @@ final class EpubReaderEngine extends ReaderEngine {
     required int textOffset,
     required int pageNumber,
     required int pageCount,
+    bool pageCountEstimated = false,
     required int coverageStart,
     required int coverageEnd,
     required bool atEnd,
   }) {
     _batchingViewport = true;
     _pageCount = pageCount;
+    _pageCountEstimated = pageCountEstimated;
     viewportPositionChanged(
       local,
       textOffset: textOffset,
@@ -455,11 +492,19 @@ final class EpubReaderEngine extends ReaderEngine {
     _publish();
   }
 
-  void viewportPaginationChanged(int count, int visiblePage) {
-    if (_disposed || (_pageCount == count && _visiblePage == visiblePage)) {
+  void viewportPaginationChanged(
+    int count,
+    int visiblePage, {
+    bool estimated = false,
+  }) {
+    if (_disposed ||
+        (_pageCount == count &&
+            _visiblePage == visiblePage &&
+            _pageCountEstimated == estimated)) {
       return;
     }
     _pageCount = count;
+    _pageCountEstimated = estimated;
     _visiblePage = visiblePage;
     _publish();
   }
@@ -508,7 +553,7 @@ final class EpubReaderEngine extends ReaderEngine {
       locationLabel: !_viewportReady && _displayed != null
           ? _displayed!.locationLabel
           : 'Chapter ${_locator!.spineIndex + 1} of $_chapterCount'
-                '${_pageCount > 0 ? ' · Page $_visiblePage of $_pageCount' : ''}',
+                '${_pageCount > 0 ? ' · Page $_visiblePage of ${_pageCountEstimated ? '≈' : ''}$_pageCount' : ''}',
     );
     if (_viewportReady) {
       _displayed = snapshot as ReaderReadySnapshot;
@@ -537,9 +582,10 @@ final class EpubReaderEngine extends ReaderEngine {
     _worker?.dispose();
     _worker = null;
     _openingWorker = null;
-    moveWithinChapter = null;
-    prepareChapter = null;
+    moveViewport = null;
+    prepareLocation = null;
     _chapterCache.clear();
+    _chapterRequests.clear();
     super.dispose();
   }
 }
