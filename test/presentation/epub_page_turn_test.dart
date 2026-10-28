@@ -76,6 +76,61 @@ void main() {
     );
   }
 
+  for (final direction in [-1, 1]) {
+    testWidgets(
+      'interrupted page animation records the visible page (direction $direction)',
+      (tester) async {
+        final engine = testEpubEngine();
+        await engine.load(
+          ReaderDocument(
+            id: 'interrupted-turn',
+            format: ReaderFormat.epub,
+            loadBytes: () async => syntheticEpub(longChapter: true),
+          ),
+          preferences: const ReaderPreferences(),
+        );
+        await tester.pumpWidget(
+          MaterialApp(home: Builder(builder: engine.buildViewport)),
+        );
+        await tester.pumpAndSettle();
+        await pumpReaderCommand(tester, engine.goNext());
+        final controller = tester
+            .widget<PageView>(find.byType(PageView))
+            .controller!;
+        expect(controller.page, 1);
+        final before = engine.snapshot;
+        final turn = direction > 0 ? engine.goNext() : engine.goPrevious();
+        await tester.pump();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 16));
+        expect(controller.page, isNot(1));
+        expect((controller.page! - 1).abs(), lessThan(.5));
+        final gesture = await tester.startGesture(
+          tester.getCenter(find.byType(PageView)),
+        );
+        await gesture.moveBy(Offset(40.0 * direction, 0));
+        await tester.pump(const Duration(milliseconds: 200));
+        await gesture.up();
+        await pumpReaderCommand(tester, turn);
+        expect(controller.page, 1);
+        expect(engine.snapshot.locator, before.locator);
+        expect(engine.snapshot.locationLabel, before.locationLabel);
+        expect(
+          engine.snapshot.coverage.single.start,
+          before.coverage.single.start,
+        );
+        expect(engine.snapshot.coverage.single.end, before.coverage.single.end);
+        await pumpReaderCommand(tester, engine.goNext());
+        expect(
+          controller.page,
+          2,
+          reason: 'The next command must not skip a page',
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
   testWidgets('queued turns continue visually into a multipage destination', (
     tester,
   ) async {
