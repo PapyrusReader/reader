@@ -472,19 +472,34 @@ final class _EpubViewportState extends State<EpubViewport> {
       return true;
     }
 
-    if (_pagesController.hasClients) {
-      if (MediaQuery.maybeOf(context)?.disableAnimations ?? false) {
-        _pagesController.jumpToPage(next);
-      } else {
-        await _pagesController.animateToPage(
-          next,
-          duration: _turnDuration,
-          curve: Curves.easeOutCubic,
-        );
+    final controller = _pagesController;
+
+    if (!controller.hasClients) {
+      return true;
+    }
+
+    if (MediaQuery.maybeOf(context)?.disableAnimations ?? false) {
+      controller.jumpToPage(next);
+    } else {
+      await controller.animateToPage(
+        next,
+        duration: _turnDuration,
+        curve: Curves.easeOutCubic,
+      );
+    }
+
+    // Touch input can complete the animation future before its target is reached.
+    // Subsequent drag/settling updates continue through onPageChanged.
+    if (mounted &&
+        identical(controller, _pagesController) &&
+        controller.hasClients) {
+      final page = controller.page;
+
+      if (page != null) {
+        _publishPage(page.round());
       }
     }
 
-    if (mounted) _publishPage(next);
     return true;
   }
 
