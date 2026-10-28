@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -8,6 +9,27 @@ import '../../domain/reader_preferences.dart';
 import '../../domain/reader_selection.dart';
 import '../../domain/reader_locator.dart';
 import '../../presentation/reader_interaction_scope.dart';
+
+/// Converts worker blocks only when the page cursor reaches them. In particular,
+/// a large spine item must not decode all of its illustrations on the UI thread.
+final class EpubContentBlocks extends ListBase<EpubContentBlock> {
+  EpubContentBlocks(this._blocks);
+  final List<Object?> _blocks;
+
+  @override
+  int get length => _blocks.length;
+
+  @override
+  EpubContentBlock operator [](int index) =>
+      EpubContentBlock(Map<String, Object?>.from(_blocks[index] as Map));
+
+  @override
+  set length(int value) => throw UnsupportedError('Read-only content');
+
+  @override
+  void operator []=(int index, EpubContentBlock value) =>
+      throw UnsupportedError('Read-only content');
+}
 
 final class EpubContentBlock {
   EpubContentBlock(Map<String, Object?> json)
@@ -143,8 +165,7 @@ final class EpubRichPage {
   int get offset => fragments.isEmpty ? 0 : fragments.first.offset;
 }
 
-/// Measures each paragraph once and cuts at actual line boundaries. Long
-/// paragraphs never trigger repeated binary-search layouts or surrogate splits.
+/// Collects a complete layout for export and layout verification.
 Future<List<EpubRichPage>> layoutEpubChapter(
   List<EpubContentBlock> blocks, {
   required Size contentSize,
@@ -152,26 +173,48 @@ Future<List<EpubRichPage>> layoutEpubChapter(
   required TextScaler textScaler,
   required TextDirection direction,
   required bool Function() cancelled,
-}) async {
+}) => paginateEpub(
+  blocks,
+  contentSize: contentSize,
+  preferences: preferences,
+  textScaler: textScaler,
+  direction: direction,
+  cancelled: cancelled,
+).toList();
+
+/// Measures each paragraph once and cuts at actual line boundaries. Long
+/// paragraphs never trigger repeated binary-search layouts or surrogate splits.
+Stream<EpubRichPage> paginateEpub(
+  List<EpubContentBlock> blocks, {
+  required Size contentSize,
+  required ReaderPreferences preferences,
+  required TextScaler textScaler,
+  required TextDirection direction,
+  required bool Function() cancelled,
+  Future<void> Function()? yieldWork,
+}) async* {
   final width = math.max(1.0, contentSize.width);
   final height = math.max(1.0, contentSize.height);
-  final pages = <EpubRichPage>[];
+  var emitted = false;
   var fragments = <EpubPageFragment>[];
   var used = 0.0;
   final stopwatch = Stopwatch()..start();
-  void finish() {
-    if (fragments.isEmpty) return;
-    pages.add(EpubRichPage(List.unmodifiable(fragments)));
+  EpubRichPage finish() {
+    emitted = true;
+    final page = EpubRichPage(List.unmodifiable(fragments));
     fragments = [];
     used = 0;
+    return page;
   }
 
   for (final block in blocks) {
-    if (cancelled()) return const [];
+    if (cancelled()) return;
     final spacing = block.paragraphEnd ? preferences.paragraphSpacing : 0.0;
     if (block.image != null) {
       final imageHeight = math.min(width / block.aspect, height * .65);
-      if (used + imageHeight + spacing > height) finish();
+      if (used + imageHeight + spacing > height && fragments.isNotEmpty) {
+        yield finish();
+      }
       fragments.add(EpubPageFragment(block, 0, 1, imageHeight));
       used += imageHeight + spacing;
     } else {
@@ -181,60 +224,72 @@ Future<List<EpubRichPage>> layoutEpubChapter(
         textDirection: direction,
         textScaler: textScaler,
       )..layout(maxWidth: width);
-      final lines = painter.computeLineMetrics();
-      final text = span.toPlainText();
-      var start = 0;
-      var segmentHeight = 0.0;
-      for (var lineIndex = 0; lineIndex < lines.length; lineIndex++) {
-        final line = lines[lineIndex];
-        final top = line.baseline - line.ascent;
-        final bottom = line.baseline + line.descent;
-        // Ascent/descent exclude part of the line-height leading on Skia fonts.
-        // Count the complete line box so several paragraphs cannot overfill a
-        // page even when the glyph bounds are shorter than their line boxes.
-        final lineHeight = line.height;
-        if (used + segmentHeight + lineHeight + spacing > height &&
-            (used > 0 || segmentHeight > 0)) {
-          final position = painter.getPositionForOffset(
-            Offset(line.left + line.width / 2, (top + bottom) / 2),
-          );
-          // Query inside the line: x=0 can resolve to the previous line's end
-          // on Skia, even when the y coordinate belongs to the following line.
-          final boundary = painter
-              .getLineBoundary(
-                TextPosition(
-                  offset: position.offset,
-                  affinity: TextAffinity.downstream,
-                ),
-              )
-              .start;
-          if (boundary > start) {
-            fragments.add(
-              EpubPageFragment(block, start, boundary, segmentHeight),
+      try {
+        final lines = painter.computeLineMetrics();
+        final text = span.toPlainText();
+        var start = 0;
+        var segmentHeight = 0.0;
+        for (var lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+          final line = lines[lineIndex];
+          final top = line.baseline - line.ascent;
+          final bottom = line.baseline + line.descent;
+          // Ascent/descent exclude part of the line-height leading on Skia fonts.
+          // Count the complete line box so several paragraphs cannot overfill a
+          // page even when the glyph bounds are shorter than their line boxes.
+          final lineHeight = line.height;
+          if (used + segmentHeight + lineHeight + spacing > height &&
+              (used > 0 || segmentHeight > 0)) {
+            final position = painter.getPositionForOffset(
+              Offset(line.left + line.width / 2, (top + bottom) / 2),
             );
-            start = boundary;
+            // Query inside the line: x=0 can resolve to the previous line's end
+            // on Skia, even when the y coordinate belongs to the following line.
+            final boundary = painter
+                .getLineBoundary(
+                  TextPosition(
+                    offset: position.offset,
+                    affinity: TextAffinity.downstream,
+                  ),
+                )
+                .start;
+            if (boundary > start) {
+              fragments.add(
+                EpubPageFragment(block, start, boundary, segmentHeight),
+              );
+              start = boundary;
+            }
+            if (fragments.isNotEmpty) {
+              yield finish();
+              if (cancelled()) return;
+            }
+            segmentHeight = 0;
           }
-          finish();
-          segmentHeight = 0;
+          segmentHeight += lineHeight;
         }
-        segmentHeight += lineHeight;
+        if (start < text.length) {
+          fragments.add(
+            EpubPageFragment(block, start, text.length, segmentHeight),
+          );
+          used += segmentHeight + spacing;
+        }
+      } finally {
+        painter.dispose();
       }
-      if (start < text.length) {
-        fragments.add(
-          EpubPageFragment(block, start, text.length, segmentHeight),
-        );
-        used += segmentHeight + spacing;
-      }
-      painter.dispose();
     }
     if (stopwatch.elapsedMilliseconds >= 4) {
-      await Future<void>.delayed(Duration.zero);
+      if (yieldWork == null) {
+        await Future<void>.delayed(Duration.zero);
+      } else {
+        await yieldWork();
+      }
       stopwatch.reset();
     }
   }
-  finish();
-  if (pages.isEmpty) pages.add(const EpubRichPage([]));
-  return List.unmodifiable(pages);
+  if (fragments.isNotEmpty) {
+    yield finish();
+  } else if (!emitted) {
+    yield const EpubRichPage([]);
+  }
 }
 
 Widget buildEpubFragment(

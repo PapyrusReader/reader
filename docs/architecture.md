@@ -37,10 +37,20 @@ terminate their sessions on disposal. The browser must permit `worker-src blob:`
 Flutter's `TextPainter` measures styled runs at the actual column width, text
 scale and direction. Pagination cuts at line boundaries, keeps run styles and
 uses content offsets for restoration. Work yields between bounded batches.
-Adjacent chapters are prefetched after the current viewport commits. The viewport
-retains at most three layouts for the current geometry; document, font, viewport
-or typography changes invalidate them. Requested navigation cancels speculative
-measurement. Only visible pages are built.
+Paginated reading consumes a resumable page stream, preparing a few spreads ahead
+instead of waiting for an entire spine item. Worker blocks are converted lazily,
+including image decoding. Adjacent spine items share in-flight loading and page
+cursors with foreground navigation, so turning does not restart prefetch work.
+The viewport retains at most three layout cursors for the current geometry.
+Document, font, viewport or typography changes dispose them. Only visible pages
+are built. Already measured pages remain available for backward turns. The location
+bar always includes a current page and total. Until the exact total is available,
+it marks a text-offset-based estimate with `≈`. A separate yielding counter finishes
+the current and next item's totals without retaining their pages or advancing the
+reading cursor. Geometry changes invalidate both the layouts and their totals. Seeking
+to an unmeasured offset or the end of a spine item still requires measuring the
+preceding content in yielding batches. Continuous scrolling collects a complete
+layout to determine its scroll extent.
 
 Chapter preparation keeps the committed page and snapshot visible until the
 replacement layout is ready. Reflow retains the previous layout while measuring;
@@ -48,8 +58,12 @@ appearance changes reuse geometry. Full-page loading is limited to initial openi
 with a small delayed indicator for subsequent slow operations. Failed preparation
 keeps readable content and offers retry. Coverage describes committed viewports.
 
-The viewport owns page and scroll controllers and responds to local turns before
-the engine crosses chapter boundaries. Single-column content has a maximum line
+The viewport owns page and scroll controllers. Paginated commands use the same
+slide duration within and across spine items. At a boundary it retains the outgoing
+spread, animates to the prepared destination, then commits reading coverage and
+the visible locator. Reduced motion skips the animation. Rapid commands wait for
+each transition to finish. Spine indices identify content and saved positions,
+independently of any table-of-contents chapter divisions. Single-column content has a maximum line
 width; spreads collapse on narrow or highly scaled viewports. Scrolling uses the
 same rich content and measured extents. A supplied `EpubContentRenderer` remains
 available for custom HTML scrolling, with progression-based restoration.
