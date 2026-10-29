@@ -175,13 +175,9 @@ try {
   assert.ok(beforeWheel && afterWheel && Math.abs(beforeWheel.y - afterWheel.y) < 1,
     'A normal paginated column must fit without hidden vertical overflow');
   await openSettings();
-  const animation = page.getByRole('switch', { name: /Page turn animation/ });
-  await animation.click();
-  await animation.waitForFunction(element => element.getAttribute('aria-checked') === 'false');
-  await settle();
+  await select('Slide', 'None');
   await screenshot('desktop-instant-turns');
-  await animation.click();
-  await animation.waitForFunction(element => element.getAttribute('aria-checked') === 'true');
+  await select('None', 'Slide');
   await closeSettings();
   await screenshot('desktop');
   await hideControls();
