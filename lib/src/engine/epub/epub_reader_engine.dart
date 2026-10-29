@@ -50,6 +50,7 @@ final class EpubReaderEngine extends ReaderEngine {
   Future<void> Function(
     EpubReaderLocator target,
     List<EpubContentBlock> blocks,
+    bool Function() cancelled,
   )?
   prepareLocation;
   Future<void> _turnQueue = Future<void>.value();
@@ -57,6 +58,7 @@ final class EpubReaderEngine extends ReaderEngine {
   int _restorationRevision = 0;
   int _contentRevision = 0;
   int _navigationGeneration = 0;
+  _EpubSeek? _activeSeek;
   bool _disposed = false;
   int _visiblePage = 1;
   int _pageCount = 0;
@@ -88,6 +90,7 @@ final class EpubReaderEngine extends ReaderEngine {
     supportsScrolling: true,
     supportsTextCustomization: true,
     supportsColumnMode: true,
+    supportsPageTurnAnimation: true,
   );
   @override
   ReaderSnapshot snapshot = const ReaderIdleSnapshot();
@@ -105,6 +108,7 @@ final class EpubReaderEngine extends ReaderEngine {
         'The EPUB document or initial locator has the wrong format.',
       );
     }
+    cancelPendingSeek();
     final generation = ++_navigationGeneration;
     EpubWorker? candidate;
     try {
@@ -255,7 +259,12 @@ final class EpubReaderEngine extends ReaderEngine {
   }
 
   @override
-  Future<void> goTo(ReaderLocator locator) async {
+  Future<void> goTo(ReaderLocator locator) {
+    cancelPendingSeek();
+    return _goTo(locator);
+  }
+
+  Future<void> _goTo(ReaderLocator locator, {_EpubSeek? seek}) async {
     if (locator is! EpubReaderLocator ||
         locator.spineIndex >= _chapterCount ||
         _worker == null) {
@@ -274,7 +283,7 @@ final class EpubReaderEngine extends ReaderEngine {
         local: locator.localProgression,
         textOffset: offset?.clamp(0, _contentLength),
       );
-      await prepareLocation?.call(target, _blocks);
+      await _prepare(target, _blocks, seek);
       _requireCurrent(generation);
       _locator = target;
       _coverage = const [];
@@ -282,9 +291,10 @@ final class EpubReaderEngine extends ReaderEngine {
       _atEnd = false;
       _restorationRevision++;
     } else {
-      final chapter = await chapterContent(locator.spineIndex);
+      final request = chapterContent(locator.spineIndex);
+      final chapter = await (seek?.wait(request) ?? request);
       _requireCurrent(generation);
-      await prepareLocation?.call(
+      await _prepare(
         _locatorFor(
           locator.spineIndex,
           local: locator.localProgression,
@@ -294,11 +304,33 @@ final class EpubReaderEngine extends ReaderEngine {
                     locator.textOffset,
         ),
         EpubContentBlocks(chapter['blocks'] as List),
+        seek,
       );
       _requireCurrent(generation);
       _setChapter(chapter, locator);
     }
     _publish();
+  }
+
+  Future<void> _prepare(
+    EpubReaderLocator target,
+    List<EpubContentBlock> blocks,
+    _EpubSeek? seek,
+  ) async {
+    final preparation = prepareLocation?.call(
+      target,
+      blocks,
+      () => seek?.cancelled ?? false,
+    );
+    if (preparation != null) await (seek?.wait(preparation) ?? preparation);
+  }
+
+  @override
+  void cancelPendingSeek() {
+    final seek = _activeSeek;
+    if (seek == null || seek.cancelled) return;
+    _navigationGeneration++;
+    seek.cancel();
   }
 
   @override
@@ -316,14 +348,25 @@ final class EpubReaderEngine extends ReaderEngine {
         'No EPUB document is loaded.',
       );
     }
+    cancelPendingSeek();
+    final seek = _EpubSeek();
+    _activeSeek = seek;
     final position = _progressIndex!.position(progress);
-    await goTo(
-      _locatorFor(
-        position.chapter,
-        local: progress == 1 ? 1 : 0,
-        textOffset: position.offset,
-      ),
-    );
+    try {
+      await _goTo(
+        _locatorFor(
+          position.chapter,
+          local: progress == 1 ? 1 : 0,
+          textOffset: position.offset,
+        ),
+        seek: seek,
+      );
+    } catch (_) {
+      // A cancelled request must not report a late preparation failure.
+      if (!seek.cancelled) rethrow;
+    } finally {
+      if (identical(_activeSeek, seek)) _activeSeek = null;
+    }
   }
 
   @override
@@ -525,6 +568,7 @@ final class EpubReaderEngine extends ReaderEngine {
           backgroundColor: _preferences.backgroundColor,
           foregroundColor: _preferences.foregroundColor,
           brightness: _preferences.brightness,
+          pageTurnAnimation: _preferences.pageTurnAnimation,
         ) !=
         _preferences;
     _preferences = preferences;
@@ -576,6 +620,7 @@ final class EpubReaderEngine extends ReaderEngine {
   @override
   void dispose() {
     if (_disposed) return;
+    cancelPendingSeek();
     _disposed = true;
     _navigationGeneration++;
     _openingWorker?.dispose();
@@ -588,4 +633,19 @@ final class EpubReaderEngine extends ReaderEngine {
     _chapterRequests.clear();
     super.dispose();
   }
+}
+
+final class _EpubSeek {
+  final _cancellation = Completer<void>();
+  bool get cancelled => _cancellation.isCompleted;
+  void cancel() => _cancellation.complete();
+
+  Future<T> wait<T>(Future<T> operation) => Future.any([
+    operation,
+    _cancellation.future.then<T>((_) => throw const _CancelledSeek()),
+  ]);
+}
+
+final class _CancelledSeek implements Exception {
+  const _CancelledSeek();
 }

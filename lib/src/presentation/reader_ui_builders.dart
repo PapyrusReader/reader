@@ -9,6 +9,8 @@ typedef ReaderToolbarBuilder =
     Widget Function(BuildContext context, ReaderToolbarContext state);
 typedef ReaderPanelBuilder =
     Widget Function(BuildContext context, ReaderPanelContext state);
+typedef ReaderPanelHeaderBuilder =
+    Widget Function(BuildContext context, String title);
 typedef ReaderStateBuilder =
     Widget Function(BuildContext context, ReaderStateContext state);
 typedef ReaderViewportBuilder =
@@ -74,11 +76,15 @@ final class ReaderPanelContext {
     this.isBusy = false,
     this.showHeader = true,
     this.buildContents,
+    this.buildHeader,
     this.navigate,
   });
 
   final bool showHeader;
   final WidgetBuilder? buildContents;
+
+  /// Builds the standard panel header with the reader's chrome and close action.
+  final ReaderPanelHeaderBuilder? buildHeader;
   final ValueChanged<ReaderLocator>? navigate;
   final ReaderSnapshot snapshot;
   final ReaderController controller;
@@ -133,6 +139,8 @@ final class ReaderUiBuilders {
   final ReaderPanelRouteBuilder? compactPanelRoute;
   final ReaderPanelBuilder? tableOfContents;
   final ReaderPanelBuilder? settings;
+
+  /// Used while opening the document and preparing its first readable pages.
   final ReaderStateBuilder? loading;
   final ReaderStateBuilder? error;
   final ReaderStateBuilder? empty;

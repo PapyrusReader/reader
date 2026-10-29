@@ -21,6 +21,8 @@ import 'reader_controls.dart';
 import 'reader_surface.dart';
 import 'reader_contents_panel.dart';
 import 'reader_settings_panel.dart';
+import 'reader_panel_header.dart';
+import 'reader_loading.dart';
 import 'reader_theme_data.dart';
 import 'reader_ui_builders.dart';
 import '../domain/reader_selection.dart';
@@ -76,9 +78,14 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
   late ReaderController _controller;
   late bool _ownsController;
   ReaderSnapshot? _observedSnapshot;
+  bool _hasReadableContent = false;
   _ReaderPanel _panel = _ReaderPanel.none;
   bool _controlsVisible = false;
   double? _dragProgress;
+  bool _draggingProgress = false;
+  int _seekRevision = 0;
+  int? _pendingSeekRevision;
+  int? _activeSeekRevision;
   int _loadGeneration = 0;
   bool _loadedDependencies = false;
   Future<void> _commandQueue = Future<void>.value();
@@ -195,6 +202,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
               widget.initialPreferences ?? const ReaderPreferences(),
         );
     _observedSnapshot = _controller.snapshot;
+    _hasReadableContent = _controller.snapshot.contentReady;
     _controller.addListener(_controllerChanged);
   }
 
@@ -218,6 +226,11 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
   }
 
   void _invalidateCommands({bool notify = true}) {
+    _controller.cancelPendingSeek();
+    _seekRevision++;
+    _pendingSeekRevision = null;
+    _activeSeekRevision = null;
+    _draggingProgress = false;
     _commandGeneration++;
     _commandQueue = Future<void>.value();
     _pendingCommands = 0;
@@ -273,8 +286,13 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
     final previous = _observedSnapshot;
     final next = _controller.snapshot;
     _observedSnapshot = next;
+    _hasReadableContent =
+        next.status == ReaderStatus.ready &&
+        (_hasReadableContent || next.contentReady);
 
-    if (next.contentReady) {
+    if (next.contentReady &&
+        !_draggingProgress &&
+        _pendingSeekRevision == null) {
       _dragProgress = null;
     }
 
@@ -369,7 +387,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
       data: readerTheme,
       child: Builder(
         builder: (context) => Material(
-          color: snapshot.status == ReaderStatus.ready
+          color: _hasReadableContent
               ? snapshot.preferences.backgroundColor
               : theme.surfaceColor,
           child: SafeArea(
@@ -380,7 +398,19 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
                 _buildError(context, snapshot, theme),
                 theme,
               ),
-              ReaderStatus.ready => _buildReady(context, snapshot, theme),
+              ReaderStatus.ready => ReaderLoadingScope(
+                backgroundColor: theme.surfaceColor,
+                builder: (context) => Theme(
+                  data: readerTheme,
+                  child: Builder(
+                    builder: (context) => ColoredBox(
+                      color: theme.surfaceColor,
+                      child: _buildLoading(context, snapshot, theme),
+                    ),
+                  ),
+                ),
+                child: _buildReady(context, snapshot, theme),
+              ),
             },
           ),
         ),
@@ -584,8 +614,11 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
                                     _dragProgress ??
                                     _progressOf(snapshot.locator),
                                 locationLabel: snapshot.locationLabel,
-                                onProgressChanged: (value) =>
-                                    setState(() => _dragProgress = value),
+                                onProgressChangeStart: _startProgressDrag,
+                                onProgressChanged: (value) => setState(() {
+                                  _draggingProgress = true;
+                                  _dragProgress = value;
+                                }),
                                 onProgressChangeEnd: _goToProgress,
                                 onPrevious: _goPrevious,
                                 onNext: _goNext,
@@ -1016,6 +1049,8 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
       close: close,
       isBusy: _isCommandBusy,
       showHeader: showHeader,
+      buildHeader: (context, title) =>
+          ReaderPanelHeader(title: title, close: close, theme: theme),
       navigate: (locator) {
         close();
         _enqueueCommand(
@@ -1078,11 +1113,44 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
     };
   }
 
+  void _startProgressDrag(double progress) {
+    _seekRevision++;
+    _pendingSeekRevision = null;
+    if (_activeSeekRevision != null) _controller.cancelPendingSeek();
+    setState(() {
+      _draggingProgress = true;
+      _dragProgress = progress;
+    });
+  }
+
   void _goToProgress(double progress) {
-    setState(() => _dragProgress = progress);
+    final revision = ++_seekRevision;
+    if (_activeSeekRevision != null) _controller.cancelPendingSeek();
+    setState(() {
+      _draggingProgress = false;
+      _pendingSeekRevision = revision;
+      _dragProgress = progress;
+    });
     _enqueueCommand(
-      (controller) => controller.goToProgress(progress),
+      (controller) async {
+        _activeSeekRevision = revision;
+        _pendingSeekRevision = revision;
+        try {
+          await controller.goToProgress(progress);
+        } finally {
+          if (_activeSeekRevision == revision) _activeSeekRevision = null;
+          if (mounted && revision == _seekRevision) {
+            setState(() {
+              _pendingSeekRevision = null;
+              if (!_draggingProgress && controller.snapshot.contentReady) {
+                _dragProgress = null;
+              }
+            });
+          }
+        }
+      },
       context: 'while changing reader progress',
+      isCurrent: () => revision == _seekRevision,
     );
   }
 
@@ -1106,6 +1174,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
     Future<void> Function(ReaderController controller) operation, {
     required String context,
     bool expectedBoundary = false,
+    bool Function()? isCurrent,
   }) {
     if (!mounted) {
       return;
@@ -1131,14 +1200,18 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
     setState(() {});
 
     final scheduled = _commandQueue.then((_) async {
-      if (!mounted || generation != _commandGeneration) {
+      if (!mounted ||
+          generation != _commandGeneration ||
+          !(isCurrent?.call() ?? true)) {
         return;
       }
 
       try {
         await operation(controller);
       } catch (error, stackTrace) {
-        if (!mounted || generation != _commandGeneration) {
+        if (!mounted ||
+            generation != _commandGeneration ||
+            !(isCurrent?.call() ?? true)) {
           return;
         }
         if (expectedBoundary &&
@@ -1151,6 +1224,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
           operation,
           context: context,
           expectedBoundary: expectedBoundary,
+          isCurrent: isCurrent,
         );
         _handleCommandError(error, stackTrace, context);
       }
@@ -1168,9 +1242,11 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
       }
       _commandRevision.value++;
       setState(() {});
-      if (restoreReadingFocus) {
+      if (restoreReadingFocus && (isCurrent?.call() ?? true)) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted &&
+              !_draggingProgress &&
+              (isCurrent?.call() ?? true) &&
               generation == _commandGeneration &&
               _panel == _ReaderPanel.none &&
               _compactPanelRoute == null) {

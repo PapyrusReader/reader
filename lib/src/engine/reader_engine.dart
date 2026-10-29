@@ -26,6 +26,10 @@ abstract class ReaderEngine extends ChangeNotifier {
 
   Future<void> goToProgress(double progress);
 
+  /// Stop a pending progress seek when supported. Engines that cannot cancel
+  /// finish the active operation before the shell runs the latest queued seek.
+  void cancelPendingSeek() {}
+
   Future<void> goNext();
 
   Future<void> goPrevious();

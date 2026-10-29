@@ -6,9 +6,66 @@ import '../support/in_process_epub_worker.dart';
 import '../support/synthetic_epub.dart';
 
 void main() {
-  for (final reducedMotion in [false, true]) {
+  testWidgets('instant turns do not slide on commands or touch drags', (
+    tester,
+  ) async {
+    final engine = testEpubEngine();
+    await engine.load(
+      ReaderDocument(
+        id: 'instant',
+        format: ReaderFormat.epub,
+        loadBytes: () async => syntheticEpub(longChapter: true),
+      ),
+      preferences: const ReaderPreferences(),
+    );
+    await tester.pumpWidget(
+      MaterialApp(home: Builder(builder: engine.buildViewport)),
+    );
+    await tester.pumpAndSettle();
+    await pumpReaderCommand(tester, engine.goNext());
+    final controller = tester
+        .widget<PageView>(find.byType(PageView))
+        .controller!;
+    final location = engine.locator;
+    final revision = engine.restorationRevision;
+    await engine.updatePreferences(
+      engine.preferences.copyWith(pageTurnAnimation: false),
+    );
+    await tester.pump();
+    expect(engine.restorationRevision, revision);
+    expect(engine.locator, location);
+    expect(
+      tester.widget<PageView>(find.byType(PageView)).controller,
+      same(controller),
+    );
+    final next = engine.goNext();
+    await tester.pump();
+    expect(controller.page, 2);
+    await next;
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byType(PageView)),
+    );
+    await gesture.moveBy(const Offset(-150, 0));
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(controller.page, 2, reason: 'No sliding while a finger is down');
+    await gesture.up();
+    await tester.pump();
+    expect(controller.page, 3);
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(PageView), const Offset(150, 0));
+    await tester.pump();
+    expect(controller.page, 2);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final (reducedMotion, pageTurnAnimation) in [
+    (false, true),
+    (true, true),
+    (false, false),
+  ]) {
     testWidgets(
-      'boundary turns preserve the committed location until visible, reduced motion $reducedMotion',
+      'boundary turns preserve the committed location until visible, reduced motion $reducedMotion, animation $pageTurnAnimation',
       (tester) async {
         final engine = testEpubEngine();
         await engine.load(
@@ -18,7 +75,7 @@ void main() {
             loadBytes: () async =>
                 syntheticEpub(firstChapterBody: '<p>First page.</p>'),
           ),
-          preferences: const ReaderPreferences(),
+          preferences: ReaderPreferences(pageTurnAnimation: pageTurnAnimation),
         );
         await tester.pumpWidget(
           MaterialApp(
@@ -36,7 +93,7 @@ void main() {
           await tester.pump(const Duration(milliseconds: 16));
         }
 
-        if (!reducedMotion) {
+        if (!reducedMotion && pageTurnAnimation) {
           final controller = tester
               .widget<PageView>(find.byType(PageView))
               .controller!;
@@ -55,7 +112,7 @@ void main() {
           await tester.pump(const Duration(milliseconds: 16));
         }
 
-        if (!reducedMotion) {
+        if (!reducedMotion && pageTurnAnimation) {
           final controller = tester
               .widget<PageView>(find.byType(PageView))
               .controller!;
@@ -260,7 +317,7 @@ void main() {
             .widget<PageView>(find.byType(PageView))
             .childrenDelegate
             .estimatedChildCount,
-        lessThanOrEqualTo(5),
+        lessThanOrEqualTo(7),
       );
 
       for (var i = 0; i < 8; i++) {

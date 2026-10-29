@@ -164,6 +164,7 @@ final class ReaderProgressControls extends StatelessWidget {
   const ReaderProgressControls({
     super.key,
     required this.progress,
+    required this.onProgressChangeStart,
     required this.onProgressChanged,
     required this.onProgressChangeEnd,
     required this.onPrevious,
@@ -174,6 +175,7 @@ final class ReaderProgressControls extends StatelessWidget {
   });
 
   final double progress;
+  final ValueChanged<double> onProgressChangeStart;
   final ValueChanged<double> onProgressChanged;
   final ValueChanged<double> onProgressChangeEnd;
   final VoidCallback onPrevious;
@@ -207,6 +209,7 @@ final class ReaderProgressControls extends StatelessWidget {
               ),
               child: Slider(
                 value: normalized,
+                onChangeStart: enabled ? onProgressChangeStart : null,
                 onChanged: enabled ? onProgressChanged : null,
                 onChangeEnd: enabled ? onProgressChangeEnd : null,
               ),

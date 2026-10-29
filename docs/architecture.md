@@ -37,10 +37,18 @@ terminate their sessions on disposal. The browser must permit `worker-src blob:`
 Flutter's `TextPainter` measures styled runs at the actual column width, text
 scale and direction. Pagination cuts at line boundaries, keeps run styles and
 uses content offsets for restoration. Work yields between bounded batches.
-Paginated reading consumes a resumable page stream, preparing a few spreads ahead
-instead of waiting for an entire spine item. Worker blocks are converted lazily,
+Paginated reading consumes a resumable page stream. Opening prepares the visible
+spread, then a yielding background task keeps five spreads ahead ready, plus a
+coverage boundary. A turn to a prepared spread never waits for an additional page.
+Worker blocks are converted lazily,
 including image decoding. Adjacent spine items share in-flight loading and page
 cursors with foreground navigation, so turning does not restart prefetch work.
+Forward and backward neighbor preparation run independently. The previous item's
+tail is prepared when within three spreads of its boundary, while already measured
+pages remain available for reversing direction within an item. Nearby image decoding
+is warmed five spreads ahead and three behind using Flutter's image cache. Exact
+page counting starts after the current buffer is ready and cannot block preparation
+in either direction.
 The viewport retains at most three layout cursors for the current geometry.
 Document, font, viewport or typography changes dispose them. Only visible pages
 are built. Already measured pages remain available for backward turns. The location
@@ -61,7 +69,9 @@ keeps readable content and offers retry. Coverage describes committed viewports.
 The viewport owns page and scroll controllers. Paginated commands use the same
 slide duration within and across spine items. At a boundary it retains the outgoing
 spread, animates to the prepared destination, then commits reading coverage and
-the visible locator. Reduced motion skips the animation. Rapid commands wait for
+the visible locator. The page-turn animation preference and reduced motion both
+skip the animation, including drag-following and snap transitions. Touch swipes
+still turn one page on release. Changing motion does not invalidate layout. Rapid commands wait for
 each transition to finish. Spine indices identify content and saved positions,
 independently of any table-of-contents chapter divisions. Single-column content has a maximum line
 width; spreads collapse on narrow or highly scaled viewports. Scrolling uses the
@@ -90,9 +100,22 @@ independence without exposing PDFium details to the shell or host persistence.
 ## Shell
 
 The shell retains the content widget during position updates, serializes user
-commands and keeps error views escapable. Initial opening uses a centered spinner
+commands and keeps error views escapable. Progress-slider dragging previews locally
+and commits on release. New drags and releases supersede earlier slider requests,
+so queued intermediate destinations are skipped and stale failures cannot replace
+the latest result. Ordinary page-turn commands retain their order. Background
+snapshots cannot move the thumb during a drag or a pending seek.
+
+EPUB progress seeks have cancellation signals. Cancellation releases the navigation
+queue without waiting for an obsolete chapter request, and layout demand stops at
+the next yield while retaining reusable pages. Late results cannot commit a locator.
+Existing worker parsing can finish into the content cache, rather than restarting
+the document worker. The destination viewport replenishes the nearby-page buffer.
+Engines may implement `cancelPendingSeek`; engines without cooperative cancellation
+finish their active operation before the shell executes the latest queued seek. Initial opening uses a centered spinner
 without toolbar chrome; hosts can supply a loading builder to match their file-fetch
-loader. Reader appearance controls the
+loader. Initial EPUB pagination uses the same builder, host theme, centered
+position and background, without a separate preparation label. Reader appearance controls the
 chrome brightness as well as page colors. Wide panels overlay the reading area;
 compact panels fit available height and insets. A distinct surface color and
 outlined page-facing edges separate panels from book content without shadows.
@@ -124,7 +147,9 @@ The presentation layer keeps session, keyboard and viewport coordination in
 `papyrus_reader.dart`. Toolbar/progress controls, contents, settings and the panel
 header live in separate presentation modules. These modules are implementation
 details and are not exported by the package entry point. Public builder contexts
-and custom-engine integration remain in the shell's existing public API.
+and custom-engine integration remain in the shell's existing public API. Custom
+panels can call `ReaderPanelContext.buildHeader(context, title)` to reuse the
+standard title, divider, and close button with the reader's chrome theme.
 
 Hosts can supply `ReaderUiBuilders.compactPanelRoute` to own compact panel
 presentation. The factory returns an **unpushed** `Route<void>`; the reader pushes

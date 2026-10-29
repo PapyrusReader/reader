@@ -146,6 +146,30 @@ final class ReaderSettingsPanel extends StatelessWidget {
                 : null,
           ),
         ],
+        if (capabilities.supportsPageTurnAnimation &&
+            preferences.layoutMode == ReaderLayoutMode.paginated) ...[
+          const SizedBox(height: 12),
+          DropdownButtonFormField<bool>(
+            key: ValueKey(('reader-animation', preferences.pageTurnAnimation)),
+            initialValue: preferences.pageTurnAnimation,
+            isExpanded: true,
+            decoration: const InputDecoration(
+              labelText: 'Page turn animation',
+              border: OutlineInputBorder(),
+            ),
+            items: const [
+              DropdownMenuItem(value: true, child: Text('Slide')),
+              DropdownMenuItem(value: false, child: Text('None')),
+            ],
+            onChanged: enabled
+                ? (value) {
+                    if (value != null) {
+                      _update(preferences.copyWith(pageTurnAnimation: value));
+                    }
+                  }
+                : null,
+          ),
+        ],
         if (capabilities.supportsColumnMode) ...[
           const SizedBox(height: 12),
           DropdownButtonFormField<ReaderColumnMode>(

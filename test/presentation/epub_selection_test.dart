@@ -9,9 +9,14 @@ import '../support/in_process_epub_worker.dart';
 import '../support/synthetic_epub.dart';
 
 void main() {
-  for (final kind in [PointerDeviceKind.mouse, PointerDeviceKind.touch]) {
+  for (final (kind, animation) in [
+    (PointerDeviceKind.mouse, true),
+    (PointerDeviceKind.touch, true),
+    (PointerDeviceKind.mouse, false),
+    (PointerDeviceKind.touch, false),
+  ]) {
     testWidgets(
-      'selecting text at a chapter boundary does not turn the page ($kind)',
+      'selecting text at a chapter boundary does not turn the page ($kind, animation $animation)',
       (tester) async {
         tester.view.devicePixelRatio = 1;
         tester.view.physicalSize = const Size(390, 844);
@@ -27,6 +32,9 @@ void main() {
                   : TargetPlatform.linux,
             ),
             home: PapyrusReader(
+              initialPreferences: ReaderPreferences(
+                pageTurnAnimation: animation,
+              ),
               onAnnotate: (selection) => saved = selection,
               document: ReaderDocument(
                 id: 'selection',
