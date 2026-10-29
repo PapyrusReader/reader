@@ -1070,6 +1070,106 @@ void main() {
       expect(find.text('Reading mode'), findsOneWidget);
     });
 
+    testWidgets(
+      'slider releases coalesce and keep the latest preview while waiting',
+      (tester) async {
+        final gate = Completer<void>();
+        final engine = _UiReaderEngine(progressGates: [gate]);
+        final controller = controllerFor([engine]);
+        addTearDown(controller.dispose);
+        await pumpReader(
+          tester,
+          document: document('Seek'),
+          controller: controller,
+        );
+        await tester.pumpAndSettle();
+        Slider slider() => tester.widget<Slider>(find.byType(Slider).first);
+        slider().onChangeEnd!(.2);
+        await tester.pump();
+        slider().onChangeEnd!(.4);
+        slider().onChangeEnd!(.9);
+        await tester.pump();
+        expect(engine.goToProgressCalls, [.2]);
+        engine._publishLocator(
+          EpubReaderLocator(
+            spineIndex: 0,
+            localProgression: 0,
+            totalProgression: 0,
+          ),
+        );
+        await tester.pump();
+        expect(slider().value, .9);
+        gate.complete();
+        await tester.pumpAndSettle();
+        expect(engine.goToProgressCalls, [.2, .9]);
+        expect(slider().value, .9);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets('background updates do not move the thumb during a drag', (
+      tester,
+    ) async {
+      final engine = _UiReaderEngine();
+      final controller = controllerFor([engine]);
+      addTearDown(controller.dispose);
+      await pumpReader(
+        tester,
+        document: document('Drag'),
+        controller: controller,
+      );
+      await tester.pumpAndSettle();
+      Slider slider() => tester.widget<Slider>(find.byType(Slider).first);
+      slider().onChangeStart!(0);
+      slider().onChanged!(.8);
+      engine._publishLocator(
+        EpubReaderLocator(
+          spineIndex: 0,
+          localProgression: 0,
+          totalProgression: 0,
+        ),
+      );
+      await tester.pump();
+      expect(slider().value, .8);
+      expect(engine.goToProgressCalls, isEmpty);
+      slider().onChangeEnd!(.8);
+      await tester.pumpAndSettle();
+      expect(engine.goToProgressCalls, [.8]);
+    });
+
+    testWidgets('obsolete seek errors do not replace the latest result', (
+      tester,
+    ) async {
+      final gate = Completer<void>();
+      final engine = _UiReaderEngine(
+        progressGates: [gate],
+        progressFailures: [
+          const ReaderException(
+            ReaderErrorCode.invalidDocument,
+            'Obsolete seek failure',
+          ),
+        ],
+      );
+      final controller = controllerFor([engine]);
+      addTearDown(controller.dispose);
+      await pumpReader(
+        tester,
+        document: document('Failure'),
+        controller: controller,
+      );
+      await tester.pumpAndSettle();
+      final slider = tester.widget<Slider>(find.byType(Slider).first);
+      slider.onChangeEnd!(.2);
+      await tester.pump();
+      slider.onChangeEnd!(.9);
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(engine.goToProgressCalls, [.2, .9]);
+      expect(find.text('Obsolete seek failure'), findsNothing);
+      expect(tester.widget<Slider>(find.byType(Slider).first).value, .9);
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('slider, buttons, and keyboard delegate navigation', (
       tester,
     ) async {
@@ -1607,6 +1707,8 @@ final class _UiReaderEngine extends ReaderEngine {
     this.loadGate,
     this.loadFailure,
     this.nextGates = const [],
+    this.progressGates = const [],
+    this.progressFailures = const [],
     this.nextFailure,
     this.previousFailure,
     this.preferenceFailure,
@@ -1622,6 +1724,8 @@ final class _UiReaderEngine extends ReaderEngine {
   final Widget Function(BuildContext, ReaderSnapshot)? viewportBuilder;
   final ReaderException? loadFailure;
   final List<Completer<void>> nextGates;
+  final List<Completer<void>> progressGates;
+  final List<ReaderException?> progressFailures;
   final ReaderException? nextFailure;
   final ReaderException? previousFailure;
   final ReaderException? preferenceFailure;
@@ -1717,7 +1821,12 @@ final class _UiReaderEngine extends ReaderEngine {
 
   @override
   Future<void> goToProgress(double progress) async {
+    final call = goToProgressCalls.length;
     goToProgressCalls.add(progress);
+    if (call < progressGates.length) await progressGates[call].future;
+    if (call < progressFailures.length && progressFailures[call] != null) {
+      throw progressFailures[call]!;
+    }
     _publishLocator(
       EpubReaderLocator(
         spineIndex: 0,

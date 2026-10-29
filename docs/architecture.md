@@ -100,7 +100,19 @@ independence without exposing PDFium details to the shell or host persistence.
 ## Shell
 
 The shell retains the content widget during position updates, serializes user
-commands and keeps error views escapable. Initial opening uses a centered spinner
+commands and keeps error views escapable. Progress-slider dragging previews locally
+and commits on release. New drags and releases supersede earlier slider requests,
+so queued intermediate destinations are skipped and stale failures cannot replace
+the latest result. Ordinary page-turn commands retain their order. Background
+snapshots cannot move the thumb during a drag or a pending seek.
+
+EPUB progress seeks have cancellation signals. Cancellation releases the navigation
+queue without waiting for an obsolete chapter request, and layout demand stops at
+the next yield while retaining reusable pages. Late results cannot commit a locator.
+Existing worker parsing can finish into the content cache, rather than restarting
+the document worker. The destination viewport replenishes the nearby-page buffer.
+Engines may implement `cancelPendingSeek`; engines without cooperative cancellation
+finish their active operation before the shell executes the latest queued seek. Initial opening uses a centered spinner
 without toolbar chrome; hosts can supply a loading builder to match their file-fetch
 loader. Initial EPUB pagination uses the same builder, host theme, centered
 position and background, without a separate preparation label. Reader appearance controls the

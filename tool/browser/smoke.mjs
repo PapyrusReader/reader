@@ -221,6 +221,17 @@ try {
   };
   await openFile(resolve(reader, 'example/assets/reading_lab.epub'));
   await showInitialControls(page.getByText('At the Gate', { exact: true }).first());
+  const progressSlider = page.getByRole('slider').last();
+  const progressBounds = await progressSlider.boundingBox();
+  assert.ok(progressBounds, 'Reading progress must remain interactive');
+  const progressY = progressBounds.y + progressBounds.height / 2;
+  for (const fraction of [0.8, 0.15, 0.9, 1]) {
+    await page.mouse.move(progressBounds.x + progressBounds.width / 2, progressY);
+    await page.mouse.down();
+    await page.mouse.move(progressBounds.x + progressBounds.width * fraction, progressY, { steps: 3 });
+    await page.mouse.up();
+  }
+  await page.waitForFunction(() => document.querySelector('[aria-label^="Chapter 2 of 2"]'));
   await backToLibrary();
   const invalid = resolve(temp, 'invalid.epub');
   await writeFile(invalid, Buffer.from([1, 2, 3]));

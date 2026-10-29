@@ -152,6 +152,8 @@ final class ReaderController extends ChangeNotifier {
     );
   }
 
+  void cancelPendingSeek() => _engine?.cancelPendingSeek();
+
   Future<void> goNext() async {
     await _navigate(ReaderNavigationCause.turn, (engine) => engine.goNext());
   }

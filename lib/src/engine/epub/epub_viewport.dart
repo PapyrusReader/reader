@@ -642,9 +642,15 @@ final class _EpubViewportState extends State<EpubViewport> {
     EpubReaderLocator? target,
     bool toEnd = false,
     int? prefetch,
+    bool Function()? cancelled,
   }) async {
     final geometry = _geometryKey;
     final key = (index, geometry);
+    bool obsolete() =>
+        !mounted ||
+        geometry != _geometryKey ||
+        (cancelled?.call() ?? false) ||
+        (prefetch != null && prefetch != _prefetchGeneration);
     final layout = _layoutCache.putIfAbsent(key, () {
       final contentSize = _contentSize;
       final preferences = widget.engine.preferences;
@@ -681,7 +687,7 @@ final class _EpubViewportState extends State<EpubViewport> {
             (target != null &&
                 target.textOffset == null &&
                 target.localProgression > 0),
-        cancelled: () => prefetch != null && prefetch != _prefetchGeneration,
+        cancelled: obsolete,
       );
       final offset = target?.textOffset;
       if (offset != null && !layout.complete) {
@@ -690,7 +696,7 @@ final class _EpubViewportState extends State<EpubViewport> {
         );
         await layout.ensure(
           count: ((targetPage ~/ _columns) + 1) * _columns,
-          cancelled: () => prefetch != null && prefetch != _prefetchGeneration,
+          cancelled: obsolete,
         );
       }
     } catch (_) {
@@ -705,18 +711,26 @@ final class _EpubViewportState extends State<EpubViewport> {
   Future<void> _prepareLocation(
     EpubReaderLocator target,
     List<EpubContentBlock> blocks,
+    bool Function() cancelled,
   ) async {
     if (widget.engine.renderer != null &&
         widget.engine.preferences.layoutMode == ReaderLayoutMode.scroll) {
       return;
     }
 
+    _prefetchGeneration++;
+    _prefetchTimer?.cancel();
     // A resize can supersede measurement while navigation is waiting.
     Object? geometry;
     do {
       geometry = _geometryKey;
-      await _measure(target.spineIndex, blocks, target: target);
-    } while (mounted && geometry != _geometryKey);
+      await _measure(
+        target.spineIndex,
+        blocks,
+        target: target,
+        cancelled: cancelled,
+      );
+    } while (mounted && !cancelled() && geometry != _geometryKey);
   }
 
   void _publishPageCount(EpubPageLayout layout) {
