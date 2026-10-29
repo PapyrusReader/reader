@@ -9,6 +9,39 @@ import '../support/in_process_epub_worker.dart';
 import '../support/synthetic_epub.dart';
 
 void main() {
+  testWidgets(
+    'an immediate turn can use a page prepared before the viewport grows',
+    (tester) async {
+      final engine = testEpubEngine();
+      await engine.load(
+        ReaderDocument(
+          id: 'early-turn',
+          format: ReaderFormat.epub,
+          loadBytes: () async => syntheticEpub(longChapter: true),
+        ),
+        preferences: const ReaderPreferences(pageTurnAnimation: false),
+      );
+      await tester.pumpWidget(
+        MaterialApp(home: Builder(builder: engine.buildViewport)),
+      );
+      for (
+        var frame = 0;
+        frame < 100 && !engine.snapshot.contentReady;
+        frame++
+      ) {
+        await tester.pump(const Duration(milliseconds: 1));
+      }
+      expect(engine.snapshot.contentReady, isTrue);
+      final before = engine.locator.textOffset!;
+      await pumpReaderCommand(tester, engine.goNext());
+      expect(
+        tester.widget<PageView>(find.byType(PageView)).controller!.page,
+        1,
+      );
+      expect(engine.locator.textOffset, greaterThan(before));
+    },
+  );
+
   for (final blocked in [0, 2]) {
     testWidgets(
       'a slow neighbor $blocked does not block preloading the other direction',

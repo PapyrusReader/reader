@@ -52,6 +52,7 @@ final class _EpubViewportState extends State<EpubViewport> {
   bool _showLoading = false;
   int _restoration = -1;
   int _pageIndex = 0;
+  int _pageViewCount = 0;
   int _columns = 1;
   final _swipe = ReaderSwipeTracker();
   bool get _animateTurns =>
@@ -481,6 +482,13 @@ final class _EpubViewportState extends State<EpubViewport> {
       await WidgetsBinding.instance.endOfFrame;
       await _layoutReady?.future;
       return true;
+    }
+
+    if (next >= _pageViewCount) {
+      // A prepared page may not yet be included in the PageView's scroll extent.
+      setState(() {});
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted || !identical(layout, _layoutCache[_layoutKey])) return true;
     }
 
     final controller = _pagesController;
@@ -1046,6 +1054,9 @@ final class _EpubViewportState extends State<EpubViewport> {
                     );
                   } else {
                     final outgoing = _turnPages;
+                    _pageViewCount = outgoing == null
+                        ? (pages.length / columns).ceil()
+                        : 2;
                     content = PageView.builder(
                       key: ValueKey(_pagesController),
                       controller: _pagesController,
@@ -1053,9 +1064,7 @@ final class _EpubViewportState extends State<EpubViewport> {
                           ? null
                           : const NeverScrollableScrollPhysics(),
                       onPageChanged: _publishPage,
-                      itemCount: outgoing == null
-                          ? (pages.length / columns).ceil()
-                          : 2,
+                      itemCount: _pageViewCount,
                       itemBuilder: (context, index) {
                         if (outgoing != null) {
                           final oldPage = index == (_turnDirection > 0 ? 0 : 1);
