@@ -21,6 +21,7 @@ import 'reader_controls.dart';
 import 'reader_surface.dart';
 import 'reader_contents_panel.dart';
 import 'reader_settings_panel.dart';
+import 'reader_panel_header.dart';
 import 'reader_loading.dart';
 import 'reader_theme_data.dart';
 import 'reader_ui_builders.dart';
@@ -1043,6 +1044,8 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
       close: close,
       isBusy: _isCommandBusy,
       showHeader: showHeader,
+      buildHeader: (context, title) =>
+          ReaderPanelHeader(title: title, close: close, theme: theme),
       navigate: (locator) {
         close();
         _enqueueCommand(

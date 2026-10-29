@@ -147,7 +147,9 @@ The presentation layer keeps session, keyboard and viewport coordination in
 `papyrus_reader.dart`. Toolbar/progress controls, contents, settings and the panel
 header live in separate presentation modules. These modules are implementation
 details and are not exported by the package entry point. Public builder contexts
-and custom-engine integration remain in the shell's existing public API.
+and custom-engine integration remain in the shell's existing public API. Custom
+panels can call `ReaderPanelContext.buildHeader(context, title)` to reuse the
+standard title, divider, and close button with the reader's chrome theme.
 
 Hosts can supply `ReaderUiBuilders.compactPanelRoute` to own compact panel
 presentation. The factory returns an **unpushed** `Route<void>`; the reader pushes
