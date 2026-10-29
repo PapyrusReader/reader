@@ -21,6 +21,7 @@ import 'reader_controls.dart';
 import 'reader_surface.dart';
 import 'reader_contents_panel.dart';
 import 'reader_settings_panel.dart';
+import 'reader_loading.dart';
 import 'reader_theme_data.dart';
 import 'reader_ui_builders.dart';
 import '../domain/reader_selection.dart';
@@ -369,7 +370,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
       data: readerTheme,
       child: Builder(
         builder: (context) => Material(
-          color: snapshot.status == ReaderStatus.ready
+          color: snapshot.status == ReaderStatus.ready && snapshot.contentReady
               ? snapshot.preferences.backgroundColor
               : theme.surfaceColor,
           child: SafeArea(
@@ -380,7 +381,19 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
                 _buildError(context, snapshot, theme),
                 theme,
               ),
-              ReaderStatus.ready => _buildReady(context, snapshot, theme),
+              ReaderStatus.ready => ReaderLoadingScope(
+                backgroundColor: theme.surfaceColor,
+                builder: (context) => Theme(
+                  data: readerTheme,
+                  child: Builder(
+                    builder: (context) => ColoredBox(
+                      color: theme.surfaceColor,
+                      child: _buildLoading(context, snapshot, theme),
+                    ),
+                  ),
+                ),
+                child: _buildReady(context, snapshot, theme),
+              ),
             },
           ),
         ),

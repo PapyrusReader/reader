@@ -61,7 +61,9 @@ keeps readable content and offers retry. Coverage describes committed viewports.
 The viewport owns page and scroll controllers. Paginated commands use the same
 slide duration within and across spine items. At a boundary it retains the outgoing
 spread, animates to the prepared destination, then commits reading coverage and
-the visible locator. Reduced motion skips the animation. Rapid commands wait for
+the visible locator. The page-turn animation preference and reduced motion both
+skip the animation, including drag-following and snap transitions. Touch swipes
+still turn one page on release. Changing motion does not invalidate layout. Rapid commands wait for
 each transition to finish. Spine indices identify content and saved positions,
 independently of any table-of-contents chapter divisions. Single-column content has a maximum line
 width; spreads collapse on narrow or highly scaled viewports. Scrolling uses the
@@ -92,7 +94,8 @@ independence without exposing PDFium details to the shell or host persistence.
 The shell retains the content widget during position updates, serializes user
 commands and keeps error views escapable. Initial opening uses a centered spinner
 without toolbar chrome; hosts can supply a loading builder to match their file-fetch
-loader. Reader appearance controls the
+loader. Initial EPUB pagination uses the same builder, host theme, centered
+position and background, without a separate preparation label. Reader appearance controls the
 chrome brightness as well as page colors. Wide panels overlay the reading area;
 compact panels fit available height and insets. A distinct surface color and
 outlined page-facing edges separate panels from book content without shadows.

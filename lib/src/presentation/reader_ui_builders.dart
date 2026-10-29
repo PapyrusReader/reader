@@ -133,6 +133,8 @@ final class ReaderUiBuilders {
   final ReaderPanelRouteBuilder? compactPanelRoute;
   final ReaderPanelBuilder? tableOfContents;
   final ReaderPanelBuilder? settings;
+
+  /// Used while opening the document and preparing its first readable pages.
   final ReaderStateBuilder? loading;
   final ReaderStateBuilder? error;
   final ReaderStateBuilder? empty;

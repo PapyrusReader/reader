@@ -88,6 +88,7 @@ final class EpubReaderEngine extends ReaderEngine {
     supportsScrolling: true,
     supportsTextCustomization: true,
     supportsColumnMode: true,
+    supportsPageTurnAnimation: true,
   );
   @override
   ReaderSnapshot snapshot = const ReaderIdleSnapshot();
@@ -525,6 +526,7 @@ final class EpubReaderEngine extends ReaderEngine {
           backgroundColor: _preferences.backgroundColor,
           foregroundColor: _preferences.foregroundColor,
           brightness: _preferences.brightness,
+          pageTurnAnimation: _preferences.pageTurnAnimation,
         ) !=
         _preferences;
     _preferences = preferences;

@@ -9,6 +9,7 @@ import '../../domain/reader_locator.dart';
 import '../../domain/reader_types.dart';
 import '../../domain/reader_preferences.dart';
 import '../../presentation/reader_interaction_scope.dart';
+import '../../presentation/reader_loading.dart';
 import '../../presentation/reader_swipe_tracker.dart';
 import '../../presentation/reader_highlight_interaction.dart';
 import '../../presentation/reader_text_toolbar.dart';
@@ -50,6 +51,10 @@ final class _EpubViewportState extends State<EpubViewport> {
   int _pageIndex = 0;
   int _columns = 1;
   final _swipe = ReaderSwipeTracker();
+  bool get _animateTurns =>
+      widget.engine.preferences.pageTurnAnimation &&
+      !(MediaQuery.maybeOf(context)?.disableAnimations ?? false);
+
   int _startPage = 0;
   double _startScroll = 0;
   bool _restoring = false;
@@ -446,8 +451,7 @@ final class _EpubViewportState extends State<EpubViewport> {
     if (next < 0 || next >= count) {
       final index = widget.engine.locator.spineIndex + direction;
       if (index < 0 || index >= widget.engine.chapterCount) return false;
-      final animate =
-          !(MediaQuery.maybeOf(context)?.disableAnimations ?? false);
+      final animate = _animateTurns;
       final from = _pageIndex * _columns;
       final outgoing = _pages.sublist(
         from,
@@ -478,7 +482,7 @@ final class _EpubViewportState extends State<EpubViewport> {
       return true;
     }
 
-    if (MediaQuery.maybeOf(context)?.disableAnimations ?? false) {
+    if (!_animateTurns) {
       controller.jumpToPage(next);
     } else {
       await controller.animateToPage(
@@ -807,7 +811,10 @@ final class _EpubViewportState extends State<EpubViewport> {
       );
     }
     return ColoredBox(
-      color: preferences.backgroundColor,
+      color: _pages.isEmpty
+          ? ReaderLoadingScope.maybeOf(context)?.backgroundColor ??
+                preferences.backgroundColor
+          : preferences.backgroundColor,
       child: LayoutBuilder(
         builder: (context, constraints) {
           final size = Size(
@@ -901,22 +908,26 @@ final class _EpubViewportState extends State<EpubViewport> {
                       _layoutReady!.complete();
                     }
                     _busy = false;
-                    return Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            'Could not prepare these pages.',
-                            style: TextStyle(
-                              color: preferences.foregroundColor,
+                    return ColoredBox(
+                      color: preferences.backgroundColor,
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Could not prepare these pages.',
+                              style: TextStyle(
+                                color: preferences.foregroundColor,
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 12),
-                          FilledButton(
-                            onPressed: () => setState(() => _layoutKey = null),
-                            child: const Text('Try again'),
-                          ),
-                        ],
+                            const SizedBox(height: 12),
+                            FilledButton(
+                              onPressed: () =>
+                                  setState(() => _layoutKey = null),
+                              child: const Text('Try again'),
+                            ),
+                          ],
+                        ),
                       ),
                     );
                   }
@@ -926,23 +937,7 @@ final class _EpubViewportState extends State<EpubViewport> {
                       snapshot.data!.isNotEmpty;
 
                   if (!ready && _pages.isEmpty) {
-                    return Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          CircularProgressIndicator(
-                            color: preferences.foregroundColor,
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            'Preparing pages…',
-                            style: TextStyle(
-                              color: preferences.foregroundColor,
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
+                    return const ReaderLoading();
                   }
                   if (ready) {
                     _displayPreferences = preferences;
@@ -996,6 +991,9 @@ final class _EpubViewportState extends State<EpubViewport> {
                     content = PageView.builder(
                       key: ValueKey(_pagesController),
                       controller: _pagesController,
+                      physics: _animateTurns
+                          ? null
+                          : const NeverScrollableScrollPhysics(),
                       onPageChanged: _publishPage,
                       itemCount: outgoing == null
                           ? (pages.length / columns).ceil()
@@ -1063,12 +1061,13 @@ final class _EpubViewportState extends State<EpubViewport> {
                           }
                         } else {
                           if (drag < 0 &&
-                              _startPage ==
-                                  (pages.length / columns).ceil() - 1) {
+                              (!_animateTurns ||
+                                  _startPage ==
+                                      (pages.length / columns).ceil() - 1)) {
                             _requestTurn(1);
                           }
 
-                          if (drag > 0 && _startPage == 0) {
+                          if (drag > 0 && (!_animateTurns || _startPage == 0)) {
                             _requestTurn(-1);
                           }
                         }

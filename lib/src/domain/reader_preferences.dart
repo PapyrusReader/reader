@@ -17,6 +17,7 @@ final class ReaderPreferences {
     this.brightness = Brightness.light,
     this.layoutMode = ReaderLayoutMode.paginated,
     this.columnMode = ReaderColumnMode.single,
+    this.pageTurnAnimation = true,
   }) : assert(fontSize > 0),
        assert(lineHeight > 0),
        assert(paragraphSpacing >= 0);
@@ -32,6 +33,7 @@ final class ReaderPreferences {
   final Brightness brightness;
   final ReaderLayoutMode layoutMode;
   final ReaderColumnMode columnMode;
+  final bool pageTurnAnimation;
 
   ReaderPreferences copyWith({
     Object? fontFamily = _unsetFontFamily,
@@ -45,6 +47,7 @@ final class ReaderPreferences {
     Brightness? brightness,
     ReaderLayoutMode? layoutMode,
     ReaderColumnMode? columnMode,
+    bool? pageTurnAnimation,
   }) {
     return ReaderPreferences(
       fontFamily: identical(fontFamily, _unsetFontFamily)
@@ -60,6 +63,7 @@ final class ReaderPreferences {
       brightness: brightness ?? this.brightness,
       layoutMode: layoutMode ?? this.layoutMode,
       columnMode: columnMode ?? this.columnMode,
+      pageTurnAnimation: pageTurnAnimation ?? this.pageTurnAnimation,
     );
   }
 
@@ -77,7 +81,8 @@ final class ReaderPreferences {
           foregroundColor == other.foregroundColor &&
           brightness == other.brightness &&
           layoutMode == other.layoutMode &&
-          columnMode == other.columnMode;
+          columnMode == other.columnMode &&
+          pageTurnAnimation == other.pageTurnAnimation;
 
   @override
   int get hashCode => Object.hash(
@@ -92,5 +97,6 @@ final class ReaderPreferences {
     brightness,
     layoutMode,
     columnMode,
+    pageTurnAnimation,
   );
 }
