@@ -70,9 +70,22 @@ try {
   assert.ok(protocol.blocks > 20);
   assert.equal(protocol.error, 'invalidDocument');
 
-  const settle = () => page.evaluate(() => new Promise(resolve => {
-    let frames = 0;
-    const tick = () => ++frames >= 60 ? resolve() : requestAnimationFrame(tick);
+  const settle = () => page.evaluate(() => new Promise((resolve, reject) => {
+    const deadline = performance.now() + 5000;
+    let previous;
+    let stableFrames = 0;
+    const tick = () => {
+      const geometry = [...document.querySelectorAll('flt-semantics')].map(element => {
+        const rect = element.getBoundingClientRect();
+        return [element.textContent, rect.x, rect.y, rect.width, rect.height];
+      });
+      const current = JSON.stringify(geometry);
+      stableFrames = current === previous ? stableFrames + 1 : 0;
+      previous = current;
+      if (stableFrames >= 3) return resolve();
+      if (performance.now() >= deadline) return reject(new Error('Reader semantics did not settle within 5 seconds'));
+      requestAnimationFrame(tick);
+    };
     requestAnimationFrame(tick);
   }));
   const tapPage = async () => {
@@ -82,6 +95,7 @@ try {
   };
   const assertControlsHidden = async () => {
     for (const name of ['Back', 'Reading settings', 'Table of contents', 'Next', 'Previous']) {
+      await page.getByRole('button', { name, exact: true }).waitFor({state: 'hidden', timeout: 5000});
       assert.equal(await page.getByRole('button', { name, exact: true }).count(), 0,
         `${name} must be hidden in focus mode`);
     }
@@ -278,6 +292,8 @@ try {
   await page.mouse.wheel(0, 180);
   await page.getByLabel(/Page 3 of 3/).waitFor();
   await settle();
+  // Discrete PDF wheel turns intentionally debounce input for 250 ms.
+  await page.waitForTimeout(260);
   await page.mouse.wheel(0, -180);
   await page.getByLabel(/Page 2 of 3/).waitFor();
   await settle();
