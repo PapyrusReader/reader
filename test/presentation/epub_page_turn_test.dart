@@ -317,7 +317,7 @@ void main() {
             .widget<PageView>(find.byType(PageView))
             .childrenDelegate
             .estimatedChildCount,
-        lessThanOrEqualTo(5),
+        lessThanOrEqualTo(7),
       );
 
       for (var i = 0; i < 8; i++) {

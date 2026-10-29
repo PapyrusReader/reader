@@ -37,10 +37,18 @@ terminate their sessions on disposal. The browser must permit `worker-src blob:`
 Flutter's `TextPainter` measures styled runs at the actual column width, text
 scale and direction. Pagination cuts at line boundaries, keeps run styles and
 uses content offsets for restoration. Work yields between bounded batches.
-Paginated reading consumes a resumable page stream, preparing a few spreads ahead
-instead of waiting for an entire spine item. Worker blocks are converted lazily,
+Paginated reading consumes a resumable page stream. Opening prepares the visible
+spread, then a yielding background task keeps five spreads ahead ready, plus a
+coverage boundary. A turn to a prepared spread never waits for an additional page.
+Worker blocks are converted lazily,
 including image decoding. Adjacent spine items share in-flight loading and page
 cursors with foreground navigation, so turning does not restart prefetch work.
+Forward and backward neighbor preparation run independently. The previous item's
+tail is prepared when within three spreads of its boundary, while already measured
+pages remain available for reversing direction within an item. Nearby image decoding
+is warmed five spreads ahead and three behind using Flutter's image cache. Exact
+page counting starts after the current buffer is ready and cannot block preparation
+in either direction.
 The viewport retains at most three layout cursors for the current geometry.
 Document, font, viewport or typography changes dispose them. Only visible pages
 are built. Already measured pages remain available for backward turns. The location
