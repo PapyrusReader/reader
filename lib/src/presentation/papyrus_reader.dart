@@ -78,6 +78,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
   late ReaderController _controller;
   late bool _ownsController;
   ReaderSnapshot? _observedSnapshot;
+  bool _hasReadableContent = false;
   _ReaderPanel _panel = _ReaderPanel.none;
   bool _controlsVisible = false;
   double? _dragProgress;
@@ -201,6 +202,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
               widget.initialPreferences ?? const ReaderPreferences(),
         );
     _observedSnapshot = _controller.snapshot;
+    _hasReadableContent = _controller.snapshot.contentReady;
     _controller.addListener(_controllerChanged);
   }
 
@@ -284,6 +286,9 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
     final previous = _observedSnapshot;
     final next = _controller.snapshot;
     _observedSnapshot = next;
+    _hasReadableContent =
+        next.status == ReaderStatus.ready &&
+        (_hasReadableContent || next.contentReady);
 
     if (next.contentReady &&
         !_draggingProgress &&
@@ -382,7 +387,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
       data: readerTheme,
       child: Builder(
         builder: (context) => Material(
-          color: snapshot.status == ReaderStatus.ready && snapshot.contentReady
+          color: _hasReadableContent
               ? snapshot.preferences.backgroundColor
               : theme.surfaceColor,
           child: SafeArea(
