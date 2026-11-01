@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/widgets.dart';
 
@@ -356,7 +357,10 @@ final class EpubReaderEngine extends ReaderEngine {
       await _goTo(
         _locatorFor(
           position.chapter,
-          local: progress == 1 ? 1 : 0,
+          local: progress == 1
+              ? 1
+              : position.offset /
+                    math.max(1, _progressIndex!.lengths[position.chapter]),
           textOffset: position.offset,
         ),
         seek: seek,
