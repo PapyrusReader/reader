@@ -10,6 +10,33 @@ import '../support/synthetic_epub.dart';
 
 void main() {
   testWidgets(
+    'prefetch reports completion when the entire book fits on one page',
+    (tester) async {
+      final engine = testEpubEngine();
+      await engine.load(
+        ReaderDocument(
+          id: 'one-page',
+          format: ReaderFormat.epub,
+          loadBytes: () async => syntheticEpub(
+            singleSpine: true,
+            firstChapterBody: '<p>A complete short book.</p>',
+          ),
+        ),
+        preferences: const ReaderPreferences(pageTurnAnimation: false),
+      );
+      await tester.pumpWidget(
+        MaterialApp(home: Builder(builder: engine.buildViewport)),
+      );
+      await tester.pumpAndSettle();
+      expect(engine.snapshot.contentReady, isTrue);
+      expect(engine.snapshot.atEnd, isTrue);
+      expect(engine.locator.totalProgression, 1);
+      expect(engine.snapshot.coverage.single.end, 1);
+      expect(engine.locator.textOffset, 0);
+    },
+  );
+
+  testWidgets(
     'an immediate turn can use a page prepared before the viewport grows',
     (tester) async {
       final engine = testEpubEngine();

@@ -522,7 +522,11 @@ final class _EpubViewportState extends State<EpubViewport> {
     return true;
   }
 
-  void _publishPage(int index, {int? restoredOffset}) {
+  void _publishPage(
+    int index, {
+    int? restoredOffset,
+    bool schedulePrefetch = true,
+  }) {
     if (_restoring || _busy || _pages.isEmpty) {
       return;
     }
@@ -558,7 +562,9 @@ final class _EpubViewportState extends State<EpubViewport> {
       coverageEnd: coverageEnd,
       atEnd: complete && after == _pages.length,
     );
-    _schedulePrefetch();
+    if (schedulePrefetch) {
+      _schedulePrefetch();
+    }
   }
 
   void _scrollChanged() {
@@ -835,7 +841,19 @@ final class _EpubViewportState extends State<EpubViewport> {
             wasComplete != current.complete) {
           setState(() {});
         }
-        _publishPageCount(current);
+        if (!wasComplete &&
+            current.complete &&
+            widget.engine.preferences.layoutMode ==
+                ReaderLayoutMode.paginated) {
+          _publishPage(
+            _pageIndex,
+            restoredOffset: widget.engine.locator.textOffset,
+            schedulePrefetch: false,
+          );
+        } else {
+          _publishPageCount(current);
+        }
+
         _warmImages(
           current.pages,
           (_pageIndex - _spreadsBehind) * _columns,
