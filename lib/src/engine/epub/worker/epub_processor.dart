@@ -121,7 +121,26 @@ final class EpubProcessor {
     _book = book;
     _spine = spine;
     _chapters.clear();
-    return {'count': spine.length, 'toc': tableOfContents};
+    final lengths = <int>[];
+
+    for (final chapter in spine) {
+      try {
+        final raw = await chapter.readHtmlContent();
+        final sanitized = await _sanitize(
+          raw,
+          chapter,
+          book,
+          embedImages: false,
+        );
+        lengths.add(collectEpubContent(sanitized)['length'] as int);
+      } catch (_) {
+        // Keep broken resources in the spine; visiting them still reports the
+        // original chapter error instead of shifting durable locator indices.
+        lengths.add(0);
+      }
+    }
+
+    return {'count': spine.length, 'toc': tableOfContents, 'lengths': lengths};
   }
 
   Future<Map<String, Object?>> _chapter(int index) async {
@@ -155,9 +174,55 @@ final class EpubProcessor {
   Future<String> _sanitize(
     String raw,
     EpubChapterRef chapter,
-    EpubBookRef book,
-  ) async {
+    EpubBookRef book, {
+    bool embedImages = true,
+  }) async {
     final document = html_parser.parse(raw);
+    // Gutenberg and Calibre commonly wrap a raster cover in an SVG image.
+    // Normalize that wrapper before applying the regular image sanitizer.
+    for (final svg in document.querySelectorAll('svg').toList()) {
+      final images = svg.querySelectorAll('image');
+
+      if (images.length != 1 ||
+          svg
+              .querySelectorAll('*')
+              .any(
+                (element) => !const {
+                  'image',
+                  'title',
+                  'desc',
+                }.contains(element.localName),
+              )) {
+        continue;
+      }
+
+      final image = images.single;
+      final source =
+          image.attributes['href'] ??
+          image.attributes.entries
+              .where(
+                (entry) =>
+                    entry.key.toString() == 'xlink:href' ||
+                    entry.key.toString() == 'href',
+              )
+              .map((entry) => entry.value)
+              .firstOrNull;
+      final replacement = html_dom.Element.tag('img');
+      replacement.attributes['src'] = source ?? '';
+      replacement.attributes['alt'] =
+          svg.querySelector('title')?.text ?? 'Cover';
+
+      for (final dimension in ['width', 'height']) {
+        final value = image.attributes[dimension];
+
+        if (value != null) {
+          replacement.attributes[dimension] = value;
+        }
+      }
+
+      svg.replaceWith(replacement);
+    }
+
     const blockedTags = {
       'script',
       'form',
@@ -173,6 +238,11 @@ final class EpubProcessor {
       'source',
       'track',
       'use',
+      'foreignObject',
+      'animate',
+      'animateMotion',
+      'animateTransform',
+      'set',
     };
     for (final tag in blockedTags) {
       for (final element in document.querySelectorAll(tag).toList()) {
@@ -181,12 +251,24 @@ final class EpubProcessor {
     }
 
     for (final element in document.querySelectorAll('*').toList()) {
+      final isSvgImage = element.localName == 'image';
+      final imageSource = isSvgImage
+          ? element.attributes.entries
+                .where(
+                  (entry) => const {
+                    'href',
+                    'xlink:href',
+                  }.contains(entry.key.toString()),
+                )
+                .map((entry) => entry.value)
+                .firstOrNull
+          : element.attributes['src'];
       _sanitizeAttributes(element);
-      if (element.localName != 'img') {
+      if (element.localName != 'img' && !isSvgImage) {
         continue;
       }
 
-      final source = element.attributes['src']?.trim();
+      final source = imageSource?.trim();
       final uri = source == null ? null : Uri.tryParse(source);
       if (source == null ||
           source.isEmpty ||
@@ -210,13 +292,16 @@ final class EpubProcessor {
         continue;
       }
 
-      final bytes = await image.readContent();
       final mime = image.contentMimeType ?? 'application/octet-stream';
       if (!mime.toLowerCase().startsWith('image/')) {
         element.remove();
         continue;
       }
-      element.attributes['src'] = 'data:$mime;base64,${base64Encode(bytes)}';
+      if (embedImages) {
+        final bytes = await image.readContent();
+        element.attributes[isSvgImage ? 'href' : 'src'] =
+            'data:$mime;base64,${base64Encode(bytes)}';
+      }
     }
     return document.outerHtml;
   }
@@ -224,7 +309,17 @@ final class EpubProcessor {
   void _sanitizeAttributes(html_dom.Element element) {
     for (final name in element.attributes.keys.toList()) {
       final normalizedName = name.toString().toLowerCase();
-      if (normalizedName.startsWith('on') || normalizedName == 'srcset') {
+      if (normalizedName.startsWith('on') ||
+          normalizedName == 'srcset' ||
+          normalizedName == 'xlink:href' ||
+          (normalizedName != 'style' &&
+              RegExp(
+                r'url\s*\(',
+                caseSensitive: false,
+              ).hasMatch(element.attributes[name]!) &&
+              !RegExp(
+                r'''^url\(\s*(['"]?)#[\w:.-]+\1\s*\)$''',
+              ).hasMatch(element.attributes[name]!))) {
         element.attributes.remove(name);
       }
     }

@@ -2,16 +2,47 @@ import 'package:flutter/widgets.dart';
 
 import '../controller/reader_controller.dart';
 import '../domain/reader_document.dart';
+import '../domain/reader_locator.dart';
 import '../domain/reader_snapshot.dart';
 
 typedef ReaderToolbarBuilder =
     Widget Function(BuildContext context, ReaderToolbarContext state);
 typedef ReaderPanelBuilder =
     Widget Function(BuildContext context, ReaderPanelContext state);
+typedef ReaderPanelHeaderBuilder =
+    Widget Function(BuildContext context, String title);
 typedef ReaderStateBuilder =
     Widget Function(BuildContext context, ReaderStateContext state);
 typedef ReaderViewportBuilder =
     Widget Function(BuildContext context, ReaderViewportContext state);
+
+/// Creates an unpushed compact panel route. The reader pushes and tracks it so
+/// document replacement and disposal dismiss only the reader's own panel.
+typedef ReaderPanelRouteBuilder =
+    Route<void> Function(BuildContext context, ReaderPanelRouteContext panel);
+
+/// Builds live panel content without a header, surface, or drag handle.
+/// Attach [scrollController] to the host sheet's coordinated scrolling surface.
+typedef ReaderPanelContentBuilder =
+    Widget Function(BuildContext context, ScrollController? scrollController);
+
+enum ReaderPanelKind { tableOfContents, settings }
+
+final class ReaderPanelRouteContext {
+  const ReaderPanelRouteContext({
+    required this.kind,
+    required this.title,
+    required this.buildContent,
+  });
+
+  final ReaderPanelKind kind;
+  final String title;
+
+  /// Content subscribes to reader changes and uses the theme at this context.
+  /// Navigation and settings still run through the reader's command queue.
+  /// Existing custom panel builders remain responsible for their own content.
+  final ReaderPanelContentBuilder buildContent;
+}
 
 final class ReaderToolbarContext {
   const ReaderToolbarContext({
@@ -22,7 +53,7 @@ final class ReaderToolbarContext {
     this.onBack,
     this.isBusy = false,
     this.toggleControls,
-    this.controlsVisible = true,
+    this.controlsVisible = false,
   });
 
   final ReaderDocument document;
@@ -43,8 +74,18 @@ final class ReaderPanelContext {
     required this.controller,
     required this.close,
     this.isBusy = false,
+    this.showHeader = true,
+    this.buildContents,
+    this.buildHeader,
+    this.navigate,
   });
 
+  final bool showHeader;
+  final WidgetBuilder? buildContents;
+
+  /// Builds the standard panel header with the reader's chrome and close action.
+  final ReaderPanelHeaderBuilder? buildHeader;
+  final ValueChanged<ReaderLocator>? navigate;
   final ReaderSnapshot snapshot;
   final ReaderController controller;
   final VoidCallback close;
@@ -80,6 +121,8 @@ final class ReaderViewportContext {
 final class ReaderUiBuilders {
   const ReaderUiBuilders({
     this.toolbar,
+    this.toolbarActions,
+    this.compactPanelRoute,
     this.tableOfContents,
     this.settings,
     this.loading,
@@ -89,8 +132,15 @@ final class ReaderUiBuilders {
   });
 
   final ReaderToolbarBuilder? toolbar;
+  final List<Widget> Function(BuildContext context, ReaderToolbarContext state)?
+  toolbarActions;
+
+  /// Overrides compact panel presentation; wide side panels are unchanged.
+  final ReaderPanelRouteBuilder? compactPanelRoute;
   final ReaderPanelBuilder? tableOfContents;
   final ReaderPanelBuilder? settings;
+
+  /// Used while opening the document and preparing its first readable pages.
   final ReaderStateBuilder? loading;
   final ReaderStateBuilder? error;
   final ReaderStateBuilder? empty;

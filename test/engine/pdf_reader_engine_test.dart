@@ -16,6 +16,55 @@ void main() {
   }
 
   group('PdfReaderEngine', () {
+    test('zoomed content is ready without qualifying a full page', () {
+      final exposure = pdfViewportExposure([
+        const Rect.fromLTWH(0, 0, 1000, 1000),
+      ], const Rect.fromLTWH(100, 100, 200, 200));
+      expect(exposure.contentVisible, isTrue);
+      expect(exposure.pages, isEmpty);
+      final spread = pdfViewportExposure([
+        const Rect.fromLTWH(0, 0, 500, 800),
+        const Rect.fromLTWH(510, 0, 500, 800),
+      ], const Rect.fromLTWH(0, 0, 1010, 800));
+      expect(spread.pages, [0, 1]);
+      expect(
+        pdfViewportExposure([
+          const Rect.fromLTWH(0, 0, 100, 100),
+        ], const Rect.fromLTWH(200, 200, 100, 100)).contentVisible,
+        isFalse,
+      );
+    });
+
+    testWidgets(
+      'viewport readiness is independent of qualified page coverage',
+      (tester) async {
+        final facade = FakePdfFacade(pageCount: 3);
+        final engine = PdfReaderEngine(facadeFactory: (_) async => facade);
+        addTearDown(engine.dispose);
+        await engine.load(document(), preferences: const ReaderPreferences());
+        expect(engine.snapshot.contentReady, isFalse);
+        await tester.pumpWidget(
+          Directionality(
+            textDirection: TextDirection.ltr,
+            child: Builder(builder: engine.buildViewport),
+          ),
+        );
+        final config = facade.lastConfiguration!;
+        config.onContentReadyChanged!(false);
+        config.onVisiblePagesChanged!([]);
+        expect(engine.snapshot.contentReady, isFalse);
+        config.onContentReadyChanged!(true);
+        expect(engine.snapshot.contentReady, isTrue);
+        expect(engine.snapshot.coverage, isEmpty);
+        config.onVisiblePagesChanged!([0, 1]);
+        expect(engine.snapshot.coverage.map((c) => c.pdfPageIndex), [0, 1]);
+        config.onVisiblePagesChanged!([]);
+        expect(engine.snapshot.contentReady, isTrue);
+        await engine.goNext();
+        expect(engine.snapshot.contentReady, isFalse);
+      },
+    );
+
     testWidgets('turns whole spreads only in paginated mode', (tester) async {
       tester.view.physicalSize = const Size(1200, 800);
       tester.view.devicePixelRatio = 1;
@@ -24,7 +73,12 @@ void main() {
       final facade = FakePdfFacade(pageCount: 5);
       final engine = PdfReaderEngine(facadeFactory: (_) async => facade);
       addTearDown(engine.dispose);
-      await engine.load(document(), preferences: const ReaderPreferences());
+      await engine.load(
+        document(),
+        preferences: const ReaderPreferences(
+          columnMode: ReaderColumnMode.automatic,
+        ),
+      );
       await tester.pumpWidget(
         Directionality(
           textDirection: TextDirection.ltr,
@@ -39,7 +93,10 @@ void main() {
       await engine.goPrevious();
       expect((await engine.currentLocator() as PdfReaderLocator).pageIndex, 2);
       await engine.updatePreferences(
-        const ReaderPreferences(layoutMode: ReaderLayoutMode.scroll),
+        const ReaderPreferences(
+          layoutMode: ReaderLayoutMode.scroll,
+          columnMode: ReaderColumnMode.automatic,
+        ),
       );
       await engine.goNext();
       expect((await engine.currentLocator() as PdfReaderLocator).pageIndex, 3);
@@ -240,7 +297,6 @@ void main() {
       await expectLater(
         engine.goTo(
           EpubReaderLocator(
-            cfi: 'epubcfi(/6/2)',
             spineIndex: 0,
             localProgression: 0,
             totalProgression: 0,

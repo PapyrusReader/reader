@@ -5,7 +5,6 @@ void main() {
   group('ReaderLocator', () {
     test('round trips an EPUB locator through versioned JSON', () {
       final locator = EpubReaderLocator(
-        cfi: 'epubcfi(/6/4!/4/2/1:0)',
         spineIndex: 1,
         localProgression: 0.25,
         totalProgression: 0.4,
@@ -17,7 +16,6 @@ void main() {
       expect(decoded.toJson(), {
         'version': 1,
         'type': 'epub',
-        'cfi': 'epubcfi(/6/4!/4/2/1:0)',
         'spineIndex': 1,
         'localProgression': 0.25,
         'totalProgression': 0.4,
@@ -65,22 +63,9 @@ void main() {
   });
 
   group('EpubReaderLocator construction', () {
-    test('rejects an empty CFI', () {
-      expect(
-        () => EpubReaderLocator(
-          cfi: '',
-          spineIndex: 0,
-          localProgression: 0,
-          totalProgression: 0,
-        ),
-        throwsArgumentError,
-      );
-    });
-
     test('rejects a negative spine index', () {
       expect(
         () => EpubReaderLocator(
-          cfi: 'epubcfi(/6/2)',
           spineIndex: -1,
           localProgression: 0,
           totalProgression: 0,
@@ -92,7 +77,6 @@ void main() {
     test('rejects non-finite local progression', () {
       expect(
         () => EpubReaderLocator(
-          cfi: 'epubcfi(/6/2)',
           spineIndex: 0,
           localProgression: double.nan,
           totalProgression: 0,
@@ -104,7 +88,6 @@ void main() {
     test('rejects local progression outside zero and one', () {
       expect(
         () => EpubReaderLocator(
-          cfi: 'epubcfi(/6/2)',
           spineIndex: 0,
           localProgression: -0.01,
           totalProgression: 0,
@@ -113,7 +96,6 @@ void main() {
       );
       expect(
         () => EpubReaderLocator(
-          cfi: 'epubcfi(/6/2)',
           spineIndex: 0,
           localProgression: 1.01,
           totalProgression: 0,
@@ -125,7 +107,6 @@ void main() {
     test('rejects non-finite total progression', () {
       expect(
         () => EpubReaderLocator(
-          cfi: 'epubcfi(/6/2)',
           spineIndex: 0,
           localProgression: 0,
           totalProgression: double.infinity,
@@ -137,7 +118,6 @@ void main() {
     test('rejects total progression outside zero and one', () {
       expect(
         () => EpubReaderLocator(
-          cfi: 'epubcfi(/6/2)',
           spineIndex: 0,
           localProgression: 0,
           totalProgression: -0.01,
@@ -146,7 +126,6 @@ void main() {
       );
       expect(
         () => EpubReaderLocator(
-          cfi: 'epubcfi(/6/2)',
           spineIndex: 0,
           localProgression: 0,
           totalProgression: 1.01,
@@ -160,18 +139,10 @@ void main() {
     Map<String, Object?> validJson() => {
       'version': 1,
       'type': 'epub',
-      'cfi': 'epubcfi(/6/2)',
       'spineIndex': 0,
       'localProgression': 0.25,
       'totalProgression': 0.5,
     };
-
-    test('rejects an empty CFI', () {
-      expect(
-        () => ReaderLocator.fromJson(validJson()..['cfi'] = ''),
-        throwsFormatException,
-      );
-    });
 
     test('rejects a negative spine index', () {
       expect(

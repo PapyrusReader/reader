@@ -36,6 +36,8 @@ class FakeReaderEngine extends ReaderEngine {
   final Map<String, Completer<void>> _loadStartsByDocument = {};
   ReaderLocator? currentLocatorResult;
   final List<ReaderLocator> goToCalls = [];
+  ReaderLocator? locatorOnNavigation;
+  Completer<void>? navigationGate;
   final List<double> goToProgressCalls = [];
   int goNextCallCount = 0;
   int goPreviousCallCount = 0;
@@ -93,6 +95,9 @@ class FakeReaderEngine extends ReaderEngine {
   @override
   Future<void> goTo(ReaderLocator locator) async {
     goToCalls.add(locator);
+    final next = locatorOnNavigation;
+    if (next != null) emitLocator(next);
+    await navigationGate?.future;
   }
 
   @override

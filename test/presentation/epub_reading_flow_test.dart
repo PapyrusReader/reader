@@ -34,13 +34,18 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await engine.goNext();
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
-    await engine.goNext();
+    await pumpReaderCommand(tester, engine.goNext());
+    await tester.pumpAndSettle();
+    await pumpReaderCommand(tester, engine.goNext());
     await tester.pumpAndSettle();
     final before = await engine.currentLocator() as EpubReaderLocator;
     expect(before.textOffset, greaterThan(0));
-    await tester.tap(find.byTooltip('Hide controls'));
+    await tester.tapAt(
+      tester.getRect(find.byKey(const ValueKey('reader-content'))).center,
+    );
+    await tester.pump(const Duration(milliseconds: 350));
     await tester.pumpAndSettle();
     expect(
       (await engine.currentLocator() as EpubReaderLocator).textOffset,
@@ -52,7 +57,7 @@ void main() {
     );
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
-    expect(find.byTooltip('Hide controls'), findsOneWidget);
+    expect(find.byTooltip('Reading settings'), findsOneWidget);
     expect(
       (await engine.currentLocator() as EpubReaderLocator).textOffset,
       before.textOffset,
@@ -124,7 +129,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await engine.goNext();
+      await pumpReaderCommand(tester, engine.goNext());
       await tester.pumpAndSettle();
       final secondPage = await engine.currentLocator() as EpubReaderLocator;
       expect(
@@ -154,15 +159,18 @@ void main() {
         secondPage.textOffset,
         reason: 'Late font loading must remeasure without losing position',
       );
-      await engine.goToProgress(1 / 3);
+      await pumpReaderCommand(
+        tester,
+        engine.goTo(engine.snapshot.toc.first.children.first.locator),
+      );
       await tester.pumpAndSettle();
-      await engine.goPrevious();
+      await pumpReaderCommand(tester, engine.goPrevious());
       await tester.pumpAndSettle();
       final previousChapterEnd =
           await engine.currentLocator() as EpubReaderLocator;
       expect(previousChapterEnd.spineIndex, 0);
       expect(previousChapterEnd.localProgression, 1);
-      await engine.goNext();
+      await pumpReaderCommand(tester, engine.goNext());
       await tester.pumpAndSettle();
       expect(
         (await engine.currentLocator() as EpubReaderLocator).spineIndex,

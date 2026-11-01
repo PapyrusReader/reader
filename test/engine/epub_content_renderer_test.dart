@@ -1,8 +1,52 @@
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:papyrus_reader/papyrus_reader.dart';
 
+import '../support/in_process_epub_worker.dart';
+import '../support/synthetic_epub.dart';
+
 void main() {
+  testWidgets('progress seeks restore the custom renderer within a chapter', (
+    tester,
+  ) async {
+    final renderer = _TrackingRenderer();
+    final engine = EpubReaderEngine(
+      renderer: renderer,
+      workerFactory: () async => InProcessEpubWorker(),
+    );
+    addTearDown(engine.dispose);
+    await engine.load(
+      ReaderDocument(
+        id: 'custom-scroll',
+        format: ReaderFormat.epub,
+        loadBytes: () async => syntheticEpub(
+          singleSpine: true,
+          firstChapterBody:
+              '<p>${List.filled(200, "Scrollable text").join(" ")}</p>',
+        ),
+      ),
+      preferences: const ReaderPreferences(layoutMode: ReaderLayoutMode.scroll),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ListenableBuilder(
+          listenable: engine,
+          builder: (context, _) => engine.buildViewport(context),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    for (final progress in [.25, .75, 1.0]) {
+      await pumpReaderCommand(tester, engine.goToProgress(progress));
+      expect(
+        renderer.controller.offset /
+            renderer.controller.position.maxScrollExtent,
+        closeTo(progress, .01),
+      );
+      expect(engine.locator.totalProgression, closeTo(progress, .01));
+    }
+  });
+
   testWidgets('programmatic restoration does not publish progress', (
     tester,
   ) async {

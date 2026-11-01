@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 
 import '../domain/reader_document.dart';
+import '../domain/reader_activity.dart';
 import '../domain/reader_exception.dart';
 import '../domain/reader_locator.dart';
 import '../domain/reader_preferences.dart';
@@ -32,6 +33,8 @@ final class ReaderController extends ChangeNotifier {
   bool _isDisposed = false;
 
   ReaderSnapshot get snapshot => _snapshot;
+  ({Object token, ReaderNavigationCause cause})? _navigationCommand;
+  ReaderNavigationCause navigationCause = ReaderNavigationCause.restore;
 
   ReaderPreferences get preferences => _snapshot.preferences;
 
@@ -57,6 +60,8 @@ final class ReaderController extends ChangeNotifier {
       candidate.dispose();
     }
     _loadingEngines.clear();
+    _navigationCommand = null;
+    navigationCause = ReaderNavigationCause.restore;
     final request = _ReaderLoadRequest(
       id: ++_latestLoadId,
       document: document,
@@ -126,7 +131,10 @@ final class ReaderController extends ChangeNotifier {
   }
 
   Future<void> goTo(ReaderLocator locator) async {
-    await _requireReadyEngine().goTo(locator);
+    await _navigate(
+      ReaderNavigationCause.jump,
+      (engine) => engine.goTo(locator),
+    );
   }
 
   Future<void> goToProgress(double progress) async {
@@ -138,15 +146,23 @@ final class ReaderController extends ChangeNotifier {
       );
     }
 
-    await _requireReadyEngine().goToProgress(progress);
+    await _navigate(
+      ReaderNavigationCause.jump,
+      (engine) => engine.goToProgress(progress),
+    );
   }
 
+  void cancelPendingSeek() => _engine?.cancelPendingSeek();
+
   Future<void> goNext() async {
-    await _requireReadyEngine().goNext();
+    await _navigate(ReaderNavigationCause.turn, (engine) => engine.goNext());
   }
 
   Future<void> goPrevious() async {
-    await _requireReadyEngine().goPrevious();
+    await _navigate(
+      ReaderNavigationCause.turn,
+      (engine) => engine.goPrevious(),
+    );
   }
 
   Future<ReaderLocator?> currentLocator() async {
@@ -154,8 +170,27 @@ final class ReaderController extends ChangeNotifier {
   }
 
   Future<void> updatePreferences(ReaderPreferences preferences) async {
-    await _requireReadyEngine().updatePreferences(preferences);
-    _syncFromEngine();
+    await _navigate(ReaderNavigationCause.reflow, (engine) async {
+      await engine.updatePreferences(preferences);
+      if (identical(_engine, engine)) _syncFromEngine();
+    });
+  }
+
+  Future<void> _navigate(
+    ReaderNavigationCause cause,
+    Future<void> Function(ReaderEngine) action,
+  ) async {
+    final engine = _requireReadyEngine();
+    final token = Object();
+    _navigationCommand = (token: token, cause: cause);
+    navigationCause = cause;
+    try {
+      await action(engine);
+    } finally {
+      if (identical(_navigationCommand?.token, token)) {
+        _navigationCommand = null;
+      }
+    }
   }
 
   void _selectEngine(ReaderEngine engine) {
@@ -191,6 +226,10 @@ final class ReaderController extends ChangeNotifier {
 
     final engine = _engine;
     if (engine != null) {
+      if (engine.snapshot.locator != _snapshot.locator) {
+        navigationCause =
+            _navigationCommand?.cause ?? ReaderNavigationCause.viewport;
+      }
       _publish(engine.snapshot);
     }
   }

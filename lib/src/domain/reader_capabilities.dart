@@ -4,12 +4,14 @@ final class ReaderCapabilities {
     this.supportsScrolling = false,
     this.supportsTextCustomization = false,
     this.supportsColumnMode = false,
+    this.supportsPageTurnAnimation = false,
   });
 
   final bool supportsPagination;
   final bool supportsScrolling;
   final bool supportsTextCustomization;
   final bool supportsColumnMode;
+  final bool supportsPageTurnAnimation;
 
   @override
   bool operator ==(Object other) =>
@@ -18,7 +20,8 @@ final class ReaderCapabilities {
           supportsPagination == other.supportsPagination &&
           supportsScrolling == other.supportsScrolling &&
           supportsTextCustomization == other.supportsTextCustomization &&
-          supportsColumnMode == other.supportsColumnMode;
+          supportsColumnMode == other.supportsColumnMode &&
+          supportsPageTurnAnimation == other.supportsPageTurnAnimation;
 
   @override
   int get hashCode => Object.hash(
@@ -26,5 +29,6 @@ final class ReaderCapabilities {
     supportsScrolling,
     supportsTextCustomization,
     supportsColumnMode,
+    supportsPageTurnAnimation,
   );
 }

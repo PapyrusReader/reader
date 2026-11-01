@@ -102,7 +102,6 @@ void main() {
 
     test('delegates loading to the matching engine', () async {
       final initialLocator = EpubReaderLocator(
-        cfi: 'epubcfi(/6/2!/4/1:0)',
         spineIndex: 0,
         localProgression: 0,
         totalProgression: 0,
@@ -120,7 +119,6 @@ void main() {
     test('mirrors engine state and emits locator changes once', () async {
       await controller.load(document);
       final locator = EpubReaderLocator(
-        cfi: 'epubcfi(/6/6!/4/1:4)',
         spineIndex: 2,
         localProgression: 0.4,
         totalProgression: 0.5,
@@ -135,10 +133,44 @@ void main() {
       expect(notifications, 1);
     });
 
+    test(
+      'command causes are scoped and subsequent engine navigation is a viewport change',
+      () async {
+        await controller.load(document);
+        final jump = EpubReaderLocator(
+          spineIndex: 1,
+          localProgression: 0,
+          totalProgression: .2,
+        );
+        final viewport = EpubReaderLocator(
+          spineIndex: 1,
+          localProgression: .5,
+          totalProgression: .3,
+        );
+        final observed = <ReaderNavigationCause>[];
+        controller.addListener(() => observed.add(controller.navigationCause));
+        engine.locatorOnNavigation = jump;
+        engine.navigationGate = Completer<void>();
+        final command = controller.goTo(jump);
+        expect(observed.last, ReaderNavigationCause.jump);
+        engine.navigationGate!.complete();
+        await command;
+        engine.emitLocator(viewport);
+        expect(observed.last, ReaderNavigationCause.viewport);
+        await controller.goNext();
+        engine.emitLocator(jump);
+        expect(observed.last, ReaderNavigationCause.viewport);
+        await controller.updatePreferences(
+          const ReaderPreferences(fontSize: 20),
+        );
+        engine.emitLocator(viewport);
+        expect(observed.last, ReaderNavigationCause.viewport);
+      },
+    );
+
     test('delegates navigation and current location', () async {
       await controller.load(document);
       final locator = EpubReaderLocator(
-        cfi: 'epubcfi(/6/4!/4/1:0)',
         spineIndex: 1,
         localProgression: 0.1,
         totalProgression: 0.2,
@@ -357,7 +389,6 @@ void main() {
       final load = controller.load(document);
       await started.future;
       final locator = EpubReaderLocator(
-        cfi: 'epubcfi(/6/2)',
         spineIndex: 0,
         localProgression: 0,
         totalProgression: 0,
@@ -390,7 +421,6 @@ void main() {
       engine.loadFailure = failure;
       await expectLater(controller.load(document), throwsA(same(failure)));
       final locator = EpubReaderLocator(
-        cfi: 'epubcfi(/6/2)',
         spineIndex: 0,
         localProgression: 0,
         totalProgression: 0,
@@ -483,7 +513,6 @@ void main() {
           onLocatorChanged: (_) => throw callbackFailure,
         );
         final locator = EpubReaderLocator(
-          cfi: 'epubcfi(/6/2)',
           spineIndex: 0,
           localProgression: 0,
           totalProgression: 0,

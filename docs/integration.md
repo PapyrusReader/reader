@@ -10,11 +10,10 @@ host-owned and must be disposed by the host. Engine factories must return fresh
 instances. Observers should enqueue durable host writes, with a flush on close,
 background and profile changes. The package never writes account-scoped data.
 
-Serialize `ReaderLocator.toJson()` in full. Existing version-1 EPUB and PDF
-locators remain readable. New EPUB positions may include `textOffset` and `anchor`;
-these fields improve reflow and TOC restoration without a database migration.
-Do not interpret legacy EPUB CFI strings as standardized CFI positions. A custom
-HTML scrolling renderer continues to use approximate progression restoration.
+Serialize `ReaderLocator.toJson()` in full. EPUB positions use `spineIndex`,
+`textOffset`, and an optional `anchor`. Custom HTML scrolling renderers use
+approximate progression restoration. EPUB locators do not contain CFI strings;
+standardized EPUB CFI interoperability is not implemented.
 
 PDF stores `pageIndex`, `pageOffset` and `totalProgression`. A custom facade can
 report intra-page offsets through `PdfViewportConfiguration.onPositionChanged`.
@@ -45,3 +44,18 @@ loads the worker through `rootBundle` and creates a local Blob URL. A restrictiv
 Content Security Policy must allow `worker-src blob:`; do not fall back silently
 to main-thread parsing if worker initialization fails. Offline deployment must
 cache the packaged worker alongside other Flutter assets.
+
+## Optional activity observations
+
+`PapyrusReader(onActivity: ...)` reports `ReaderActivityEvent` readiness, visibility,
+locator, navigation cause, exposed stable coverage, and end-of-document state.
+The callback is optional and independent of Goals. Hosts own clocks, foreground lifecycle,
+completion confirmation, persistence, and aggregation.
+
+Settings and contents panels mark content obscured. EPUB coverage uses normalized
+chapter UTF-16 content extents, with spine count for host calibration; PDF coverage
+lists actually exposed page indices, including spreads. Jumps never expose skipped
+pages. Engines without page metrics retain time tracking through ready snapshots.
+Parsing remains in the existing worker/isolate transports; activity reporting does
+not require whole-book layout. Reflow reports coverage without changing the
+restored locator's precise content offset.

@@ -5,7 +5,6 @@ import 'package:papyrus_reader/papyrus_reader.dart';
 
 void main() {
   final locator = EpubReaderLocator(
-    cfi: 'epubcfi(/6/2)',
     spineIndex: 0,
     localProgression: 0,
     totalProgression: 0,
@@ -30,6 +29,25 @@ void main() {
 
     expect(snapshot.toc, [entry]);
     expect(() => snapshot.toc.add(entry), throwsUnsupportedError);
+  });
+
+  test('ready snapshots defensively copy content coverage', () {
+    const coverage = ReaderContentCoverage(
+      key: 'chapter:0',
+      start: 0,
+      end: .5,
+      chapterCount: 2,
+    );
+    final source = [coverage];
+    final snapshot = ReaderReadySnapshot(
+      document: document,
+      preferences: const ReaderPreferences(),
+      capabilities: const ReaderCapabilities(),
+      coverage: source,
+    );
+    source.clear();
+    expect(snapshot.coverage, [coverage]);
+    expect(() => snapshot.coverage.clear(), throwsUnsupportedError);
   });
 
   test('ReaderTocEntry defensively copies nested child source lists', () {

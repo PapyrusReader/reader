@@ -14,7 +14,7 @@ final class ReaderThemeData {
     this.compactBreakpoint = 720,
     this.sidePanelWidth = 320,
     this.compactToolbarHeight = 56,
-    this.wideToolbarHeight = 64,
+    this.wideToolbarHeight = 56,
     this.minimumTargetSize = 48,
     this.panelPadding = 16,
   });
@@ -23,9 +23,9 @@ final class ReaderThemeData {
     final colors = theme.colorScheme;
 
     return ReaderThemeData(
-      chromeColor: colors.surfaceContainer,
+      chromeColor: colors.surface,
       surfaceColor: colors.surface,
-      panelColor: colors.surfaceContainerLow,
+      panelColor: colors.surface,
       accentColor: colors.primary,
       progressColor: colors.primary,
       handleColor: colors.primary,

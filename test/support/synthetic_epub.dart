@@ -5,6 +5,7 @@ Uint8List syntheticEpub({
   bool fixedLayout = false,
   bool malicious = false,
   bool longChapter = false,
+  bool singleSpine = false,
   String? firstChapterBody,
   String? secondChapterBody,
   bool reversedToc = false,
@@ -81,8 +82,7 @@ Uint8List syntheticEpub({
  </manifest>
  <spine toc="ncx">
   <itemref idref="chapter1"/>
-  <itemref idref="chapter2"/>
-  <itemref idref="chapter3"/>
+  ${singleSpine ? '' : '<itemref idref="chapter2"/><itemref idref="chapter3"/>'}
  </spine>
 </package>'''),
     'OEBPS/toc.ncx': utf8.encode('''
@@ -91,6 +91,7 @@ Uint8List syntheticEpub({
  <head><meta name="dtb:uid" content="synthetic"/></head>
  <docTitle><text>Synthetic Book</text></docTitle>
  <navMap>
+${singleSpine ? '' : '''
   <navPoint id="one" playOrder="1">
    <navLabel><text>Chapter One</text></navLabel>
    <content src="text/chapter${reversedToc ? 3 : 1}.xhtml"/>
@@ -103,6 +104,7 @@ Uint8List syntheticEpub({
    <navLabel><text>Chapter Two</text></navLabel>
    <content src="text/chapter${reversedToc ? 1 : 3}.xhtml"/>
   </navPoint>
+'''}
  </navMap>
 </ncx>'''),
     'OEBPS/text/chapter1.xhtml': utf8.encode(

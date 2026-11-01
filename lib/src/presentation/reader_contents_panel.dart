@@ -9,6 +9,8 @@ import 'reader_theme_data.dart';
 final class ReaderContentsPanel extends StatelessWidget {
   const ReaderContentsPanel({
     super.key,
+    this.showHeader = true,
+    this.scrollController,
     required this.snapshot,
     required this.close,
     required this.theme,
@@ -16,6 +18,8 @@ final class ReaderContentsPanel extends StatelessWidget {
     required this.onNavigate,
   });
 
+  final bool showHeader;
+  final ScrollController? scrollController;
   final ReaderSnapshot snapshot;
   final VoidCallback close;
   final ReaderThemeData theme;
@@ -24,28 +28,24 @@ final class ReaderContentsPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final content = ListView(
+      controller: scrollController,
+      shrinkWrap: !showHeader,
+      children: [
+        if (snapshot.toc.isEmpty)
+          const Padding(
+            padding: EdgeInsets.all(24),
+            child: Text('No table of contents is available.'),
+          ),
+        for (final entry in snapshot.toc)
+          _TocEntryTile(entry: entry, enabled: enabled, onNavigate: onNavigate),
+      ],
+    );
+    if (!showHeader) return content;
     return Column(
       children: [
         ReaderPanelHeader(title: 'Contents', close: close, theme: theme),
-        Expanded(
-          child: snapshot.toc.isEmpty
-              ? const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Text('No table of contents is available.'),
-                  ),
-                )
-              : ListView(
-                  children: [
-                    for (final entry in snapshot.toc)
-                      _TocEntryTile(
-                        entry: entry,
-                        enabled: enabled,
-                        onNavigate: onNavigate,
-                      ),
-                  ],
-                ),
-        ),
+        Expanded(child: content),
       ],
     );
   }
