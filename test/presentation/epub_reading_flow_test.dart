@@ -41,6 +41,7 @@ void main() {
         expect(first.length, columns == ReaderColumnMode.double ? 2 : 1);
         expect(first.map((page) => page.key).toSet().length, first.length);
         expect(first.every((page) => page.end > page.start), isTrue);
+        expect(first.every((page) => page.chapterCount == null), isTrue);
         if (first.length == 2) {
           expect(first.first.end, first.last.start);
         }

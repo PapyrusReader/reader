@@ -512,11 +512,9 @@ final class EpubReaderEngine extends ReaderEngine {
         for (final page in pageRanges)
           if (page.end > start && page.start < end && page.end > page.start)
             ReaderContentCoverage(
-              key:
-                  'epub:${_locator!.spineIndex}:${page.start}:${page.end}:$_contentLength',
+              key: 'epub:${_locator!.spineIndex}:${page.start}:$_contentLength',
               start: math.max(start, page.start) / _contentLength,
               end: (math.min(end, page.end) / _contentLength).clamp(0, 1),
-              chapterCount: _chapterCount,
             ),
     ];
     final nextEnd = atEnd && _locator!.spineIndex == _chapterCount - 1;

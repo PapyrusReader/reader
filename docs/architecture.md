@@ -65,7 +65,10 @@ replacement layout is ready. Reflow retains the previous layout while measuring;
 appearance changes reuse geometry. Full-page loading is limited to initial opening,
 with a small delayed indicator for subsequent slow operations. Failed preparation
 keeps readable content and offers retry. Coverage describes committed viewports as separate rendered pages. EPUB coverage
-keys include the spine index, page boundary offsets and chapter content length.
+keys include the spine index, stable page start offset and chapter content length.
+The page end is excluded because background pagination can extend it over a
+paragraph separator. Page-scoped coverage omits `chapterCount`; chapter-scoped
+coverage supplies it for hosts that calibrate estimates from publisher metadata.
 Scrolling clips the visible content extents while retaining the rendered page key.
 Hosts can count exposed pages independently of publisher page-count metadata.
 
