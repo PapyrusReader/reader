@@ -7,6 +7,61 @@ import '../support/in_process_epub_worker.dart';
 import '../support/synthetic_epub.dart';
 
 void main() {
+  for (final columns in [ReaderColumnMode.single, ReaderColumnMode.double]) {
+    testWidgets(
+      'reading coverage identifies each rendered page in $columns layout',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = const Size(1280, 850);
+        addTearDown(tester.view.reset);
+        final engine = testEpubEngine();
+        await tester.pumpWidget(
+          MaterialApp(
+            home: PapyrusReader(
+              registry: ReaderEngineRegistry([
+                ReaderEngineRegistration(
+                  formats: const {ReaderFormat.epub},
+                  factory: () => engine,
+                ),
+              ]),
+              initialPreferences: ReaderPreferences(
+                columnMode: columns,
+                pageTurnAnimation: false,
+              ),
+              document: ReaderDocument(
+                id: 'coverage',
+                format: ReaderFormat.epub,
+                loadBytes: () async => syntheticEpub(longChapter: true),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final first = engine.snapshot.coverage;
+        expect(first.length, columns == ReaderColumnMode.double ? 2 : 1);
+        expect(first.map((page) => page.key).toSet().length, first.length);
+        expect(first.every((page) => page.end > page.start), isTrue);
+        if (first.length == 2) {
+          expect(first.first.end, first.last.start);
+        }
+        await pumpReaderCommand(tester, engine.goNext());
+        await tester.pumpAndSettle();
+        expect(engine.snapshot.coverage.first.start, first.last.end);
+        expect(
+          engine.snapshot.coverage
+              .map((page) => page.key)
+              .toSet()
+              .intersection(first.map((page) => page.key).toSet()),
+          isEmpty,
+        );
+        await pumpReaderCommand(tester, engine.goPrevious());
+        await tester.pumpAndSettle();
+        expect(engine.snapshot.coverage, first);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
   testWidgets('hiding chrome keeps a long EPUB on its current content offset', (
     tester,
   ) async {
