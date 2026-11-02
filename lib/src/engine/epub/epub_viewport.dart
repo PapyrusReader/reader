@@ -560,6 +560,13 @@ final class _EpubViewportState extends State<EpubViewport> {
       pageCountEstimated: layout != null && layout.pageCount == null,
       coverageStart: _pages[page].offset,
       coverageEnd: coverageEnd,
+      pageRanges: [
+        for (var index = page; index < after; index++)
+          (
+            start: _pages[index].offset,
+            end: index + 1 < after ? _pages[index + 1].offset : coverageEnd,
+          ),
+      ],
       atEnd: complete && after == _pages.length,
     );
     if (schedulePrefetch) {
@@ -608,6 +615,19 @@ final class _EpubViewportState extends State<EpubViewport> {
       pageCount: _pages.length,
       coverageStart: offset,
       coverageEnd: lastOffset.clamp(0, widget.engine.contentLength),
+      pageRanges: [
+        for (
+          var page = index;
+          page < _pages.length && _scrollOffsets[page] < bottom;
+          page++
+        )
+          (
+            start: _pages[page].offset,
+            end: page + 1 < _pages.length
+                ? _pages[page + 1].offset
+                : widget.engine.contentLength,
+          ),
+      ],
       atEnd: pixels >= max - 1,
     );
   }

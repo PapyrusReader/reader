@@ -64,7 +64,13 @@ Chapter preparation keeps the committed page and snapshot visible until the
 replacement layout is ready. Reflow retains the previous layout while measuring;
 appearance changes reuse geometry. Full-page loading is limited to initial opening,
 with a small delayed indicator for subsequent slow operations. Failed preparation
-keeps readable content and offers retry. Coverage describes committed viewports.
+keeps readable content and offers retry. Coverage describes committed viewports as separate rendered pages. EPUB coverage
+keys include the spine index, stable page start offset and chapter content length.
+The page end is excluded because background pagination can extend it over a
+paragraph separator. Page-scoped coverage omits `chapterCount`; chapter-scoped
+coverage supplies it for hosts that calibrate estimates from publisher metadata.
+Scrolling clips the visible content extents while retaining the rendered page key.
+Hosts can count exposed pages independently of publisher page-count metadata.
 
 The viewport owns page and scroll controllers. Paginated commands use the same
 slide duration within and across spine items. At a boundary it retains the outgoing
