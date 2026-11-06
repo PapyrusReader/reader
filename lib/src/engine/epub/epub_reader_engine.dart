@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/widgets.dart';
+import 'package:flutter/foundation.dart' show listEquals;
 
 import '../../domain/reader_capabilities.dart';
 import '../../domain/reader_activity.dart';
@@ -461,6 +462,7 @@ final class EpubReaderEngine extends ReaderEngine {
     bool pageCountEstimated = false,
     required int coverageStart,
     required int coverageEnd,
+    required List<({int start, int end})> pageRanges,
     required bool atEnd,
   }) {
     _batchingViewport = true;
@@ -471,7 +473,12 @@ final class EpubReaderEngine extends ReaderEngine {
       textOffset: textOffset,
       pageNumber: pageNumber,
     );
-    viewportCoverageChanged(coverageStart, coverageEnd, atEnd: atEnd);
+    viewportCoverageChanged(
+      coverageStart,
+      coverageEnd,
+      pageRanges: pageRanges,
+      atEnd: atEnd,
+    );
     _batchingViewport = false;
     _publish();
   }
@@ -493,30 +500,32 @@ final class EpubReaderEngine extends ReaderEngine {
     _publish();
   }
 
-  void viewportCoverageChanged(int start, int end, {bool atEnd = false}) {
+  void viewportCoverageChanged(
+    int start,
+    int end, {
+    List<({int start, int end})> pageRanges = const [],
+    bool atEnd = false,
+  }) {
     if (_disposed || _locator == null) return;
-    final coverage = _contentLength > 0 && end > start
-        ? ReaderContentCoverage(
-            key: 'epub:${_locator!.spineIndex}:$_contentLength',
-            start: start / _contentLength,
-            end: (end / _contentLength).clamp(0, 1),
-            chapterCount: _chapterCount,
-          )
-        : null;
+    final coverage = <ReaderContentCoverage>[
+      if (_contentLength > 0 && end > start)
+        for (final page in pageRanges)
+          if (page.end > start && page.start < end && page.end > page.start)
+            ReaderContentCoverage(
+              key: 'epub:${_locator!.spineIndex}:${page.start}:$_contentLength',
+              start: math.max(start, page.start) / _contentLength,
+              end: (math.min(end, page.end) / _contentLength).clamp(0, 1),
+            ),
+    ];
     final nextEnd = atEnd && _locator!.spineIndex == _chapterCount - 1;
     if (_viewportReady &&
         (!nextEnd || _locator!.totalProgression == 1) &&
         _atEnd == nextEnd &&
-        (coverage == null
-            ? _coverage.isEmpty
-            : _coverage.length == 1 &&
-                  _coverage.first.key == coverage.key &&
-                  _coverage.first.start == coverage.start &&
-                  _coverage.first.end == coverage.end)) {
+        listEquals(_coverage, coverage)) {
       return;
     }
     _viewportReady = true;
-    _coverage = coverage == null ? const [] : [coverage];
+    _coverage = coverage;
     _atEnd = nextEnd;
 
     if (nextEnd) {

@@ -24,6 +24,8 @@ void main() {
         ),
         preferences: const ReaderPreferences(pageTurnAnimation: false),
       );
+      final coverage = <ReaderContentCoverage>[];
+      engine.addListener(() => coverage.addAll(engine.snapshot.coverage));
       await tester.pumpWidget(
         MaterialApp(home: Builder(builder: engine.buildViewport)),
       );
@@ -33,6 +35,11 @@ void main() {
       expect(engine.locator.totalProgression, 1);
       expect(engine.snapshot.coverage.single.end, 1);
       expect(engine.locator.textOffset, 0);
+      expect(
+        coverage.map((extent) => extent.end).toSet().length,
+        greaterThan(1),
+      );
+      expect(coverage.map((extent) => extent.key).toSet(), hasLength(1));
     },
   );
 

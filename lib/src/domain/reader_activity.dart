@@ -19,6 +19,9 @@ final class ReaderContentCoverage {
   final String key;
   final double start;
   final double end;
+
+  /// Present for chapter-scoped coverage that needs a host page-count estimate.
+  /// Absent when the key identifies an individual rendered page.
   final int? chapterCount;
   final int? pdfPageIndex;
 
