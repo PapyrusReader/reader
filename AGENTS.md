@@ -2,7 +2,7 @@
 
 This is an independent Flutter package and Git repository. The owning workspace
 is one level up; use its `tools/flutter` and `tools/dart` SDK wrappers when present.
-Read `docs/architecture.md` before changing architecture or expanding formats.
+Read `docs/ARCHITECTURE.md` before changing architecture or expanding formats.
 
 - Domain types are host-facing and serializable. Implement the current locator contract
   without compatibility shims for older app versions.
@@ -13,11 +13,11 @@ Read `docs/architecture.md` before changing architecture or expanding formats.
 - EPUB document processing is pure Dart in `lib/src/engine/epub/worker`. Native
   isolates and browser workers use the same request/response protocol. Never
   move ZIP, XML or chapter HTML parsing back onto the Flutter UI thread.
-- Rebuild `assets/epub_worker.js` with `tool/build_epub_worker.sh` after modifying
-  worker source. The packaged JS lets dependent applications build without a
-  manual worker generation step. CI checks the generated asset for drift.
-  This package commits `pubspec.lock` and pins its CI SDK so the
-  browser worker and third-party notices are reproducible.
+- Flutter 3.47 or newer generates the browser worker automatically during web
+  builds through `bin/compile_epub_worker.dart`. Keep its dependency report complete
+  so imported source and license changes invalidate the generated asset. Native
+  builds exclude it. Do not commit generated JavaScript or third-party notices.
+  This package commits `pubspec.lock` and pins its CI SDK.
 - UI text measurement belongs in Flutter. Preserve semantic runs, Unicode,
   illustrations and content offsets when reflowing. Layout must use actual viewport
   constraints, system insets and text scaling.

@@ -52,9 +52,12 @@ locator, navigation cause, exposed stable coverage, and end-of-document state.
 The callback is optional and independent of Goals. Hosts own clocks, foreground lifecycle,
 completion confirmation, persistence, and aggregation.
 
-Settings and contents panels mark content obscured. EPUB coverage uses normalized
-chapter UTF-16 content extents, with spine count for host calibration; PDF coverage
-lists actually exposed page indices, including spreads. Jumps never expose skipped
+Settings and contents panels mark content obscured. EPUB coverage identifies
+rendered pages by spine index, page start and chapter content length, with
+normalized chapter UTF-16 extents for the visible portion. Rendered page coverage
+omits `chapterCount` and does not depend on publisher page-count metadata;
+chapter-scoped coverage may supply it for host calibration. PDF coverage lists
+actually exposed page indices, including spreads. Jumps never expose skipped
 pages. Engines without page metrics retain time tracking through ready snapshots.
 Parsing remains in the existing worker/isolate transports; activity reporting does
 not require whole-book layout. Reflow reports coverage without changing the

@@ -199,6 +199,7 @@ final class ReaderProgressControls extends StatelessWidget {
         ),
         Expanded(
           child: Semantics(
+            container: true,
             label: 'Reading progress',
             value: '$percent percent',
             slider: true,

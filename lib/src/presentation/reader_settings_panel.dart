@@ -243,7 +243,13 @@ final class ReaderSettingsPanel extends StatelessWidget {
         ),
       ],
     );
-    if (!showHeader) return content;
+    final accessibleContent = Semantics(
+      container: true,
+      explicitChildNodes: true,
+      child: content,
+    );
+
+    if (!showHeader) return accessibleContent;
     return Column(
       children: [
         ReaderPanelHeader(
@@ -251,7 +257,7 @@ final class ReaderSettingsPanel extends StatelessWidget {
           close: close,
           theme: theme,
         ),
-        Expanded(child: content),
+        Expanded(child: accessibleContent),
       ],
     );
   }

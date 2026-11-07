@@ -1,0 +1,70 @@
+# Reader architecture
+
+## Ownership and cancellation
+
+`PapyrusReader` is a Material shell over `ReaderController`. A controller owns its
+engines; a host-supplied controller remains the host's responsibility to dispose.
+Engine factories create fresh instances. Document loads use generation checks so
+late completion cannot replace a newer session. The host owns document bytes,
+account-scoped persistence and routing; the package owns transient reader resources.
+See [integration](INTEGRATION.md) for the public host contract.
+
+## EPUB processing and layout
+
+ZIP, XML and chapter HTML processing live in `EpubProcessor`, in a resident native
+isolate or packaged browser worker. Flutter `compute` does not provide a background
+worker on web. Both transports use the same protocol and release sessions on
+cancellation/disposal. Browser transfers preserve the host's byte buffer. Worker
+source changes invalidate the asset, which Flutter regenerates during web builds
+using the host application’s dependency resolution.
+
+Reading order follows the OPF spine, independently of TOC hierarchy. Chapter-local
+normalized UTF-16 offsets identify content across layout changes; screen page
+numbers are not persisted locations. Sanitization removes executable content and
+remote resource requests. Cache limits bound retained chapters, not total archive
+or renderer memory.
+
+Flutter measures semantic runs using the actual viewport, typography and text
+scale. Layout yields in batches and prepares nearby pages without replacing the
+committed viewport. Foreground navigation and prefetch share pending work. A
+failed or stale preparation cannot overwrite the visible page or saved locator.
+Geometry changes invalidate layout and page totals; appearance-only changes do not.
+
+Reading coverage is published only for committed viewports. EPUB page keys contain
+the spine index, page start and chapter content length. The end offset is excluded
+because background pagination can extend it over a paragraph separator. Scrolling
+clips visible extents without changing the page key. Host aggregation is described
+in [activity observations](INTEGRATION.md#optional-activity-observations).
+
+This is semantic reflow, not a browser CSS engine. `epub_pro` handles container and
+metadata parsing; `flutter_html` supports an injectable HTML scrolling renderer.
+Custom HTML rendering restores approximate progression rather than the default
+renderer’s precise content offset. Supported-format limits are in the
+[README](../README.md#current-scope).
+
+## PDF resources
+
+`PdfReaderEngine` uses a `PdfFacade` so engine tests do not depend on PDFium.
+The pdfrx implementation shares one document reference between metadata inspection
+and the viewer, retaining it until disposal. Appearance changes must preserve the
+viewer and zoom. Viewport/layout changes refit the current page. pdfrx owns PDF
+rendering and text selection; the host persists the serialized locator.
+
+## Shell and host presentation
+
+The shell serializes navigation. Page turns retain order; seeks supersede earlier
+queued seeks, and stale results cannot commit a locator. Cooperative seek
+cancellation releases navigation without restarting the document worker. Slider
+drags preview locally and commit on release.
+
+Controls and panels overlay the reading viewport so visibility changes do not
+repaginate content. Page-tap toggles exclude selections, links and competing
+pointer gestures. Keyboard focus survives chapter replacement without stealing
+focus from an open panel. Reduced motion changes transitions, not layout.
+
+Internal presentation modules are not public API. Host customization uses
+`ReaderUiBuilders` and exported builder contexts. A `compactPanelRoute` factory
+returns an unpushed route and connects the provided content scroll controller to
+its sheet. The reader owns presentation and activity-obscuring state; the host owns
+sheet framing, dismissal and app-theme behavior. The contents builder remains live
+when reader appearance changes. Omitting the factory retains standalone panels.

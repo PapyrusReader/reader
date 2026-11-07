@@ -10,7 +10,7 @@ import 'epub_worker.dart';
 
 Future<EpubWorker> createWorker() async {
   final script = await rootBundle.loadString(
-    'packages/papyrus_reader/assets/epub_worker.js',
+    'packages/papyrus_reader/assets/epub_worker',
   );
   final url = web.URL.createObjectURL(
     web.Blob([script.toJS].toJS, web.BlobPropertyBag(type: 'text/javascript')),

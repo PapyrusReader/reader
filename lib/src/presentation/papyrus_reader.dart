@@ -705,7 +705,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
                                     order: const NumericFocusOrder(2),
                                     child: _overlayBar(
                                       theme,
-                                      ColoredBox(
+                                      Material(
                                         key: const ValueKey(
                                           'reader-side-panel',
                                         ),

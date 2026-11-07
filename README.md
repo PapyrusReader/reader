@@ -57,7 +57,7 @@ and a live `buildContent(context, scrollController)` builder without reader head
 or framing. Return an unpushed `Route<void>`; the reader handles presentation,
 activity tracking and cleanup. Connect the builder's scroll controller to your
 sheet's scrolling coordinator. Omit this hook to use the standalone defaults.
-See [Architecture](docs/architecture.md) for the presentation contract.
+See [Architecture](docs/ARCHITECTURE.md) for the presentation contract.
 
 ## Example
 
@@ -76,27 +76,32 @@ production persistence belongs to the host application.
 The initial release supports reflowable EPUB 2/3 and PDF. Fixed-layout EPUBs
 return `ReaderErrorCode.unsupportedFixedLayout`. MOBI/AZW3, TXT, comic
 archives, search, bookmarks, highlights, and notes are planned extensions.
+Encrypted/DRM documents are unsupported. EPUB uses semantic reflow: publisher
+stylesheets, embedded fonts, advanced SVG/math, RTL progression and footnote
+interaction are incomplete; complex tables render as readable rows.
 
-- [Architecture](docs/architecture.md)
-- [Client integration](docs/integration.md)
-- [Supported formats](docs/supported-formats.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Client integration](docs/INTEGRATION.md)
 
 ## Development
 
 ```bash
 flutter analyze
 flutter test
-./tool/build_epub_worker.sh
 (cd example && flutter analyze && flutter test && flutter build web)
 # From the reader repository, after building the example:
 (cd tool/browser && npm ci && npx playwright install chromium && npm test)
 ```
 
-Use the parent workspace's pinned SDK wrappers when available. The generated
-browser worker is packaged so host applications need no extra build step; rebuild
-it after changing worker source. Browser CSP must allow `worker-src blob:`.
-Use `tool/build_epub_worker.sh --check` to check asset drift. Browser checks can
-use an installed Chrome via `PAPYRUS_CHROME_EXECUTABLE` and save screenshots via
-`PAPYRUS_SCREENSHOT_DIR`. See [Validation](docs/validation.md) for platform coverage.
+Use the parent workspace's pinned SDK wrappers when available. Flutter 3.47 or
+newer automatically compiles the browser worker from `tool/epub_worker.dart` during
+web builds, using the host application's resolved dependencies. The one-line
+`assets/epub_worker` file identifies that Dart entrypoint for the asset transformer.
+The generated JavaScript includes dependency license notices; neither is checked
+into this package.
+Native builds omit this asset. Browser CSP must allow `worker-src blob:`.
+Browser checks can use an installed Chrome via `PAPYRUS_CHROME_EXECUTABLE` and save
+screenshots via `PAPYRUS_SCREENSHOT_DIR`. See [Validation](docs/VALIDATION.md) for
+platform coverage.
 
 Licensed under AGPL-3.0.
