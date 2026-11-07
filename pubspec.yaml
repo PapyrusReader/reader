@@ -5,7 +5,7 @@ publish_to: none
 
 environment:
   sdk: ">=3.9.2 <4.0.0"
-  flutter: ">=3.35.0"
+  flutter: ">=3.47.0"
 
 dependencies:
   characters: ^1.4.1
@@ -15,8 +15,7 @@ dependencies:
   flutter_html: ^3.0.0
   # flutter_html 3.0.0 uses the private matches API removed in html 0.15.7.
   html: 0.15.6
-  # 2.4.8 requires meta 1.18, conflicting with Flutter 3.41.2's SDK pin.
-  pdfrx: ^2.4.7
+  pdfrx: ^2.4.8
   web: ^1.1.1
 
 dev_dependencies:
@@ -26,5 +25,7 @@ dev_dependencies:
 
 flutter:
   assets:
-    - assets/epub_worker.js
-    - assets/epub_worker.NOTICES
+    - path: assets/epub_worker
+      platforms: [web]
+      transformers:
+        - package: papyrus_reader:compile_epub_worker

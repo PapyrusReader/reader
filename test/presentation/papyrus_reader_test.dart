@@ -1688,13 +1688,15 @@ void main() {
       );
       expect(material.color, controller.snapshot.preferences.backgroundColor);
       expect(exception, isNull);
+      final progress = find.byWidgetPredicate(
+        (widget) =>
+            widget is Semantics &&
+            widget.properties.label == 'Reading progress',
+      );
+      expect(progress, findsOneWidget);
       expect(
-        find.byWidgetPredicate(
-          (widget) =>
-              widget is Semantics &&
-              widget.properties.label == 'Reading progress',
-        ),
-        findsOneWidget,
+        tester.getSemantics(progress).rect.size,
+        tester.getSize(find.byType(Slider)),
       );
       semantics.dispose();
     });
