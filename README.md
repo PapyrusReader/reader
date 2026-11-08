@@ -1,7 +1,8 @@
 # Papyrus Reader
 
 `papyrus_reader` is a self-contained Flutter library for reading reflowable
-EPUB 2/3 and PDF documents on Android, iOS, Web, Linux, macOS, and Windows.
+EPUB 2/3, PDF, MOBI, AZW3, TXT, CBZ and CBR documents on Android, iOS, Web,
+Linux, macOS, and Windows.
 
 It provides versioned EPUB content locations, PDF page locations, TOC/outline navigation,
 scroll and paginated layouts, configurable appearance, and a responsive
@@ -67,16 +68,27 @@ flutter run
 ```
 
 The six-platform example includes deterministic long EPUB and three-page PDF
-assets, a local EPUB/PDF file picker, light/dark themes, and in-memory
+assets, a local book file picker, light/dark themes, and in-memory
 position/preference restoration. Example positions reset when the app restarts;
 production persistence belongs to the host application.
 
 ## Current scope
 
-The initial release supports reflowable EPUB 2/3 and PDF. Fixed-layout EPUBs
-return `ReaderErrorCode.unsupportedFixedLayout`. MOBI/AZW3, TXT, comic
-archives, search, bookmarks, highlights, and notes are planned extensions.
-Encrypted/DRM documents are unsupported. EPUB uses semantic reflow: publisher
+Supported inputs are reflowable EPUB 2/3, PDF, DRM-free MOBI/AZW3 (KF8), plain
+text (UTF-8, BOM-marked UTF-16 and Windows-1252), CBZ and CBR (RAR4/RAR5).
+Comic pages use natural filename order and support JPEG, PNG, GIF, WebP and BMP;
+animations display as still pages. Password-protected archives, multi-volume
+comics, Kindle Print Replica, Topaz and encrypted/DRM books are unsupported.
+Fixed-layout EPUBs return `ReaderErrorCode.unsupportedFixedLayout`.
+
+Text and Kindle inputs use the reflow engine. Comics use a transient in-memory
+page document for zoom, scrolling and facing pages; original library files are
+never changed. Conversion runs in a cancellable isolate/browser worker before
+opening; large comics may take longer and require memory for the page document.
+Reflow uses EPUB-style content locators; comics use PDF-style page locators, so
+saved positions, bookmarks and reading activity use the existing contracts.
+
+EPUB and Kindle use semantic reflow: publisher
 stylesheets, embedded fonts, advanced SVG/math, RTL progression and footnote
 interaction are incomplete; complex tables render as readable rows.
 

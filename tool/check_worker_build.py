@@ -18,7 +18,7 @@ def check(flutter: str) -> None:
         package = temporary / "reader"
         host = temporary / "host"
         package.mkdir()
-        for name in ("lib", "bin"):
+        for name in ("lib", "bin", "third_party"):
             shutil.copytree(reader / name, package / name)
         for name in (
             "pubspec.yaml",
