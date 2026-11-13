@@ -5,6 +5,12 @@ import 'package:epub_pro/epub_pro.dart';
 import 'package:html/dom.dart' as html_dom;
 import 'package:html/parser.dart' as html_parser;
 
+import 'package:kindle_unpack/kindle_unpack.dart';
+import 'package:koni_archive_core/koni_archive_core.dart'
+    show EncryptedArchiveException;
+
+import '../../formats/comic_document.dart';
+import '../../formats/reflow_document.dart';
 import 'epub_content.dart';
 
 /// Pure Dart document session, shared by native isolates and browser workers.
@@ -18,6 +24,18 @@ final class EpubProcessor {
     Object? argument,
   ) async {
     if (command == 'open') return _open(argument as Uint8List);
+    if (command == 'open_txt') return _open(textToEpub(argument as Uint8List));
+    if (command == 'open_mobi' || command == 'open_azw3') {
+      return _open(kindleToEpub(argument as Uint8List));
+    }
+    if (command == 'prepare_cbz' || command == 'prepare_cbr') {
+      return {
+        'bytes': await comicToPdf(
+          argument as Uint8List,
+          isRar: command == 'prepare_cbr',
+        ),
+      };
+    }
     if (command == 'chapter') return _chapter(argument as int);
     throw ArgumentError('Unknown EPUB worker command: $command');
   }
@@ -409,11 +427,27 @@ Future<Map<String, Object?>> processEpubMessage(
     };
   } on EpubProcessingException catch (error) {
     return {'id': message['id'], 'error': error.code, 'message': error.message};
+  } on HeaderException catch (error) {
+    return {
+      'id': message['id'],
+      'error': error.message.contains('encrypted')
+          ? 'encryptedDocument'
+          : 'invalidDocument',
+      'message': error.message.contains('encrypted')
+          ? 'This book is encrypted. Open a DRM-free copy.'
+          : 'The Kindle document is invalid or malformed.',
+    };
+  } on EncryptedArchiveException {
+    return {
+      'id': message['id'],
+      'error': 'encryptedDocument',
+      'message': 'This comic archive requires a password.',
+    };
   } catch (_) {
     return {
       'id': message['id'],
       'error': 'invalidDocument',
-      'message': 'The EPUB document or chapter is invalid or malformed.',
+      'message': 'The book document or chapter is invalid or malformed.',
     };
   }
 }

@@ -66,9 +66,10 @@ final class _NativeEpubWorker implements EpubWorker {
     if (message['error'] != null) {
       pending.completeError(
         ReaderException(
-          message['error'] == 'unsupportedFixedLayout'
-              ? ReaderErrorCode.unsupportedFixedLayout
-              : ReaderErrorCode.invalidDocument,
+          ReaderErrorCode.values.firstWhere(
+            (code) => code.name == message['error'],
+            orElse: () => ReaderErrorCode.invalidDocument,
+          ),
           message['message'] as String,
         ),
       );

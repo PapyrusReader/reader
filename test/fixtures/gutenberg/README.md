@@ -16,3 +16,10 @@ without adding the 24 MB illustrated edition to the repository.
 
 The user's SQL Performance Explained EPUB is a local-only validation input and
 must not be copied into this fixture directory.
+
+The Kindle fixtures were retrieved for format decoding regressions on 2026-11-08:
+
+| File | Source | SHA-256 |
+| --- | --- | --- |
+| `alice.mobi` | [Older Kindle edition](https://www.gutenberg.org/ebooks/11.kindle.images) | `1b4222ffdf1862a39d0fae6d42c588f28a34c12ad73cc21c2849fe2646cac3e1` |
+| `alice.azw3` | [KF8 edition](https://www.gutenberg.org/ebooks/11.kf8.images) | `d8211269aed55ded8302f289950936db8368b4d4d384c463b722034152f8f1d2` |

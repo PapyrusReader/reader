@@ -469,15 +469,31 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
     ReaderThemeData theme,
   ) {
     final builder = widget.builders.loading;
-    if (builder != null) {
-      return builder(context, _stateContext(snapshot));
-    }
+    final content = builder != null
+        ? builder(context, _stateContext(snapshot))
+        : Center(
+            child: CircularProgressIndicator(
+              color: theme.accentColor,
+              semanticsLabel: 'Opening document',
+            ),
+          );
 
-    return Center(
-      child: CircularProgressIndicator(
-        color: theme.accentColor,
-        semanticsLabel: 'Opening document',
-      ),
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        content,
+        if (widget.onBack != null)
+          PositionedDirectional(
+            top: 0,
+            start: 0,
+            child: ReaderIconButton(
+              icon: Icons.arrow_back_rounded,
+              tooltip: 'Back',
+              onPressed: widget.onBack,
+              theme: theme,
+            ),
+          ),
+      ],
     );
   }
 

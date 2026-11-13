@@ -698,17 +698,20 @@ void main() {
       final gate = Completer<void>();
       final engine = _UiReaderEngine(loadGate: gate);
       final controller = controllerFor([engine]);
+      var backCalls = 0;
       addTearDown(controller.dispose);
 
       await pumpReader(
         tester,
         document: document('Loading'),
         controller: controller,
-        onBack: () {},
+        onBack: () => backCalls++,
       );
 
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
-      expect(find.byTooltip('Back'), findsNothing);
+      expect(find.byTooltip('Back'), findsOneWidget);
+      await tester.tap(find.byTooltip('Back'));
+      expect(backCalls, 1);
       expect(find.text('Opening The Loading Reader…'), findsNothing);
       expect(
         tester.getCenter(find.byType(CircularProgressIndicator)),

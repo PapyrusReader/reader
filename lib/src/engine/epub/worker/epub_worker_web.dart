@@ -26,15 +26,19 @@ final class _WebEpubWorker implements EpubWorker {
   _WebEpubWorker(this.worker) {
     worker.onmessage = ((web.MessageEvent event) {
       final message =
-          jsonDecode((event.data as JSString).toDart) as Map<String, dynamic>;
+          (event.data.isA<JSString>()
+                  ? jsonDecode((event.data as JSString).toDart)
+                  : event.data.dartify())
+              as Map;
       final result = _pending.remove(message['id']);
       if (result == null) return;
       if (message['error'] != null) {
         result.completeError(
           ReaderException(
-            message['error'] == 'unsupportedFixedLayout'
-                ? ReaderErrorCode.unsupportedFixedLayout
-                : ReaderErrorCode.invalidDocument,
+            ReaderErrorCode.values.firstWhere(
+              (code) => code.name == message['error'],
+              orElse: () => ReaderErrorCode.invalidDocument,
+            ),
             message['message'] as String,
           ),
         );

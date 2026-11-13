@@ -290,19 +290,25 @@ final class _DemoLibrary extends StatelessWidget {
         acceptedTypeGroups: const [
           XTypeGroup(
             label: 'Books',
-            extensions: ['epub', 'pdf'],
-            mimeTypes: ['application/epub+zip', 'application/pdf'],
+            extensions: ['epub', 'pdf', 'mobi', 'azw3', 'txt', 'cbz', 'cbr'],
+
             uniformTypeIdentifiers: [
               'org.idpf.epub-container',
               'com.adobe.pdf',
+              'public.data',
             ],
           ),
         ],
       );
       if (file == null || !context.mounted) return;
       final extension = file.name.split('.').last.toLowerCase();
-      if (extension != 'epub' && extension != 'pdf') {
-        throw const FormatException('Choose an EPUB or PDF document.');
+      final format = ReaderFormat.values
+          .where((format) => format.name == extension)
+          .firstOrNull;
+      if (format == null) {
+        throw const FormatException(
+          'Choose an EPUB, PDF, MOBI, AZW3, TXT, CBZ or CBR document.',
+        );
       }
       final id =
           'file:${file.name}:${await file.length()}:${await file.lastModified()}';
@@ -310,7 +316,7 @@ final class _DemoLibrary extends StatelessWidget {
       final document = ReaderDocument(
         id: id,
         title: file.name,
-        format: extension == 'epub' ? ReaderFormat.epub : ReaderFormat.pdf,
+        format: format,
         loadBytes: file.readAsBytes,
       );
       Navigator.of(context).push(

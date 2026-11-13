@@ -90,6 +90,7 @@ typedef PdfMetadataDocumentLoader = Future<PdfMetadataDocument> Function();
 Future<PdfFacade> createPdfrxFacade(
   Uint8List bytes, {
   required String sourceName,
+  bool preserveColors = false,
   PdfMetadataDocumentLoader? metadataDocumentLoader,
 }) async {
   final reference = PdfDocumentRefData(
@@ -114,6 +115,7 @@ Future<PdfFacade> createPdfrxFacade(
 
     final facade = _PdfrxFacade(
       documentRef: reference,
+      preserveColors: preserveColors,
       pageCount: metadataDocument.pageCount,
       outline: List.unmodifiable(outline),
       releaseDocument: releaseDocument,
@@ -167,6 +169,7 @@ PdfFacadeOutlineEntry _convertOutline(PdfOutlineNode node) {
 final class _PdfrxFacade implements PdfFacade, DisposablePdfFacade {
   _PdfrxFacade({
     required PdfDocumentRef documentRef,
+    this.preserveColors = false,
     required this.pageCount,
     required this.outline,
     VoidCallback? releaseDocument,
@@ -176,6 +179,7 @@ final class _PdfrxFacade implements PdfFacade, DisposablePdfFacade {
   }
 
   final PdfDocumentRef _documentRef;
+  final bool preserveColors;
   final PdfViewerController _controller = PdfViewerController();
   int _pageIndex = 0;
   double _pageOffset = 0;
@@ -343,7 +347,7 @@ final class _PdfrxFacade implements PdfFacade, DisposablePdfFacade {
         }
         final revision = _viewerRevision;
         return applyPdfBrightness(
-          configuration.brightness,
+          preserveColors ? Brightness.light : configuration.brightness,
           Listener(
             onPointerSignal: (event) {
               if (configuration.layoutMode != ReaderLayoutMode.paginated ||

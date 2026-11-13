@@ -42,6 +42,25 @@ Custom HTML rendering restores approximate progression rather than the default
 renderer’s precise content offset. Supported-format limits are in the
 [README](../README.md#current-scope).
 
+## Additional input formats
+
+The shared document worker prepares TXT and MOBI/AZW3 as transient EPUB content,
+then applies the same sanitizer, semantic offsets and layout pipeline. Text
+chapters use deterministic bounded chunks. The vendored Kindle decoder records
+its upstream version, license and browser adjustments in
+`third_party/kindle_unpack/UPSTREAM.md`.
+
+CBZ and CBR are decoded in the worker into a transient PDF page document. Natural
+path ordering determines page indices. Images preserve their aspect ratios and
+JPEG data; archive readers release their resources after preparation. Binary
+responses transfer typed byte buffers in browsers instead of serializing them
+as large JSON arrays. Cancelling a load terminates its conversion worker.
+
+Input format remains on `ReaderDocument`; reflow inputs use `EpubReaderLocator`
+and fixed-page inputs use `PdfReaderLocator`. The host retains the original file,
+and no conversion cache or second persisted copy is introduced. Comic colors
+are preserved in dark mode.
+
 ## PDF resources
 
 `PdfReaderEngine` uses a `PdfFacade` so engine tests do not depend on PDFium.
