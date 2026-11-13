@@ -96,6 +96,7 @@ Future<PdfFacade> createPdfrxFacade(
   required String sourceName,
   bool preserveColors = false,
   PdfViewState? initialView,
+  bool preferInitialLocator = false,
   ValueChanged<PdfViewState>? onViewChanged,
   Future<void> Function(Uri)? onOpenLink,
   PdfMetadataDocumentLoader? metadataDocumentLoader,
@@ -124,6 +125,7 @@ Future<PdfFacade> createPdfrxFacade(
       documentRef: reference,
       preserveColors: preserveColors,
       initialView: initialView,
+      preferInitialLocator: preferInitialLocator,
       onViewChanged: onViewChanged,
       onOpenLink: onOpenLink,
       pageCount: metadataDocument.pageCount,
@@ -182,6 +184,7 @@ final class _PdfrxFacade extends PdfReaderTools
     required PdfDocumentRef documentRef,
     this.preserveColors = false,
     PdfViewState? initialView,
+    bool preferInitialLocator = false,
     this.onViewChanged,
     this.onOpenLink,
     required this.pageCount,
@@ -190,6 +193,7 @@ final class _PdfrxFacade extends PdfReaderTools
   }) : _documentRef = documentRef,
        _releaseDocument = releaseDocument,
        _savedView = initialView,
+       _preferInitialLocator = preferInitialLocator,
        _fitMode = initialView?.fitMode {
     _controller.addListener(_positionChanged);
     _searcher = PdfTextSearchSession(_controller)..addListener(_searchChanged);
@@ -201,6 +205,7 @@ final class _PdfrxFacade extends PdfReaderTools
   final Future<void> Function(Uri)? onOpenLink;
   late final PdfTextSearchSession _searcher;
   PdfViewState? _savedView;
+  bool _preferInitialLocator;
   PdfFitMode? _fitMode;
   final List<PdfViewState> _history = [];
   final List<PdfViewState> _forwardHistory = [];
@@ -511,7 +516,8 @@ final class _PdfrxFacade extends PdfReaderTools
     final page = _controller.layout.pageLayouts[_pageIndex];
     final saved = _savedView;
     final Offset center;
-    if (saved != null &&
+    if (!_preferInitialLocator &&
+        saved != null &&
         saved.pageIndex == _pageIndex &&
         (restoreLocation || _fitMode != PdfFitMode.page)) {
       center = Offset(
@@ -536,6 +542,7 @@ final class _PdfrxFacade extends PdfReaderTools
       );
     } finally {
       _applyingView = false;
+      _preferInitialLocator = false;
     }
   }
 

@@ -124,6 +124,7 @@ final class PdfReaderEngine extends ReaderEngine {
             sourceName: document.id,
             preserveColors: document.format != ReaderFormat.pdf,
             initialView: document.initialPdfView,
+            preferInitialLocator: initialLocator != null,
             onViewChanged: document.onPdfViewChanged,
             onOpenLink: document.onOpenLink,
           );
