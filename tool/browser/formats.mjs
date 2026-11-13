@@ -89,7 +89,7 @@ export async function checkFormats(browser, origin, reader) {
       await (await chooser).setFiles({ name: `book.${format}`, mimeType: 'application/octet-stream', buffer: bytes });
       // Conversion and first layout vary by format and runner speed. Wait for
       // the opening overlay to finish before sending the chrome-toggle tap.
-      await page.getByRole('button', { name: 'Back', exact: true }).waitFor({ timeout: 30000 });
+      await page.getByRole('button', { name: 'Open a book', exact: true }).waitFor({ state: 'hidden', timeout: 30000 });
       await page.getByRole('progressbar').waitFor({ state: 'hidden', timeout: 60000 });
       await page.waitForTimeout(500);
       await page.mouse.click(550, 400);

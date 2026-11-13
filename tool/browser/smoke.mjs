@@ -345,7 +345,7 @@ try {
   await closeSettings();
   await page.mouse.move(450, 350);
   await page.mouse.wheel(0, 180);
-  await page.getByLabel(/Page 3 of 3/).waitFor();
+  await page.getByText('Page 3 of 3.', { exact: true }).waitFor();
   await settle();
   // Discrete PDF wheel turns intentionally debounce input for 250 ms.
   await page.waitForTimeout(260);
@@ -360,12 +360,12 @@ try {
   const pdfText = () => page.getByText('Page 2 of 3.', { exact: true });
   const continuousBefore = await pdfText().boundingBox();
   await page.mouse.move(450, 350);
-  await page.mouse.wheel(0, 100);
+  await page.mouse.wheel(0, -100);
   await pdfText().waitForFunction((element, previousY) =>
-    element.getBoundingClientRect().y < previousY - 5, continuousBefore.y);
+    element.getBoundingClientRect().y > previousY + 5, continuousBefore.y);
   await settle();
   const continuousAfter = await pdfText().boundingBox();
-  assert.ok(continuousBefore && continuousAfter && continuousAfter.y < continuousBefore.y - 5,
+  assert.ok(continuousBefore && continuousAfter && continuousAfter.y > continuousBefore.y + 5,
     'Continuous PDF mode must move within the page rather than snapping to the next page');
   await page.getByText('Page 2 of 3.', { exact: true }).waitFor();
   await screenshot('pdf-continuous');
