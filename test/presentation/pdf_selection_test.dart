@@ -13,6 +13,86 @@ import 'package:pdfrx/pdfrx.dart';
 import '../support/pdfium_test_setup.dart';
 
 void main() {
+  for (final platform in [TargetPlatform.android, TargetPlatform.iOS]) {
+    testWidgets('PDF native selection grips remain draggable on $platform', (
+      tester,
+    ) async {
+      final facade = await tester.runAsync(() async {
+        await initializePdfiumForTest();
+        return createPdfrxFacade(_pdfBytes(), sourceName: 'touch-$platform');
+      });
+      addTearDown(() => (facade as DisposablePdfFacade).dispose());
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(platform: platform),
+          home: Scaffold(
+            body: facade!.buildViewport(
+              PdfViewportConfiguration(
+                pageIndex: 0,
+                facingPages: false,
+                backgroundColor: Colors.white,
+                brightness: Brightness.light,
+                layoutMode: ReaderLayoutMode.scroll,
+                onPageChanged: (_) {},
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final controller = tester
+          .widget<PdfViewer>(find.byType(PdfViewer))
+          .controller!;
+
+      for (var frame = 0; frame < 40; frame++) {
+        await tester.pump(const Duration(milliseconds: 50));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+      }
+
+      final page = controller.document.pages.first;
+      final text = (await tester.runAsync(() => page.loadText()))!;
+      final pageRect = controller.layout.pageLayouts.first;
+      Offset character(int index) => controller.documentToGlobal(
+        text.charRects[index].center.toOffsetInDocument(
+          page: page,
+          pageRect: pageRect,
+        ),
+      )!;
+
+      await tester.longPressAt(character(3));
+      await tester.pumpAndSettle();
+      final handle = find.byKey(const ValueKey('pdf-selection-handle-b'));
+      expect(handle, findsOneWidget);
+      expect(tester.getSize(handle).width, greaterThanOrEqualTo(48));
+      expect(tester.getSize(handle).height, greaterThanOrEqualTo(48));
+      final before = await tester.runAsync(
+        () => controller.textSelectionDelegate.getSelectedText(),
+      );
+      expect(before, isNotEmpty);
+      final center = tester.getCenter(handle);
+      final drag = await tester.startGesture(center);
+      await drag.moveBy(const Offset(20, 0));
+      await tester.pump();
+      await drag.moveTo(center + character(20) - character(8));
+      await tester.pump();
+      await drag.up();
+      await tester.pumpAndSettle();
+      final after = await tester.runAsync(
+        () => controller.textSelectionDelegate.getSelectedText(),
+      );
+      expect(after!.length, greaterThan(before!.length));
+      expect(
+        find.byKey(const ValueKey('pdf-selection-handle-a')),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
+
   for (final layout in ReaderLayoutMode.values) {
     testWidgets(
       'PDF mouse drag opens annotation toolbar in $layout',
@@ -126,7 +206,14 @@ void main() {
         expect(find.text('Copy'), findsOneWidget);
         expect(find.text('Add note'), findsNothing);
         final toolbar = tester.getRect(find.text('Annotate'));
-        expect(toolbar.bottom, lessThan(start.dy));
+        expect(
+          toolbar.overlaps(Rect.fromPoints(start, end).inflate(6)),
+          isFalse,
+        );
+        expect(
+          tester.getRect(find.byType(PdfViewer)).contains(toolbar.center),
+          isTrue,
+        );
         expect(turns, 0);
         await tester.pump();
         expect(FocusManager.instance.primaryFocus, same(selectionFocus));
@@ -159,6 +246,39 @@ void main() {
         expect(controller.textSelectionDelegate.hasSelectedText, isFalse);
         expect(find.text('Annotate'), findsNothing);
 
+        await mouse.down(start);
+        await mouse.moveTo(end);
+        await tester.pump(const Duration(milliseconds: 50));
+        await mouse.up();
+
+        for (var frame = 0; frame < 10; frame++) {
+          await tester.pump(const Duration(milliseconds: 50));
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 10)),
+          );
+        }
+
+        expect(find.text('Annotate'), findsOneWidget);
+        final blank = controller.documentToGlobal(pageRect.center)!;
+        await mouse.down(blank);
+        await tester.pump();
+        expect(controller.textSelectionDelegate.hasSelectedText, isFalse);
+        expect(find.text('Annotate'), findsNothing);
+        await mouse.up();
+
+        // Neither selection nor its toolbar may return after tap recognition.
+        for (var frame = 0; frame < 10; frame++) {
+          await tester.pump(const Duration(milliseconds: 50));
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 10)),
+          );
+        }
+
+        expect(controller.textSelectionDelegate.hasSelectedText, isFalse);
+        expect(find.text('Annotate'), findsNothing);
+        expect(find.text('Copy'), findsNothing);
+
+        // Dismissal must not prevent the next genuine selection from opening it.
         await mouse.down(start);
         await mouse.moveTo(end);
         await tester.pump(const Duration(milliseconds: 50));

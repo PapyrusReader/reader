@@ -1,5 +1,7 @@
 import 'package:flutter/widgets.dart';
 
+import '../domain/pdf_reader_tools.dart';
+
 import '../domain/reader_document.dart';
 import '../domain/reader_activity.dart';
 import '../domain/reader_exception.dart';
@@ -33,6 +35,7 @@ final class ReaderController extends ChangeNotifier {
   bool _isDisposed = false;
 
   ReaderSnapshot get snapshot => _snapshot;
+  PdfReaderTools? get pdfTools => _engine?.pdfTools;
   ({Object token, ReaderNavigationCause cause})? _navigationCommand;
   ReaderNavigationCause navigationCause = ReaderNavigationCause.restore;
 

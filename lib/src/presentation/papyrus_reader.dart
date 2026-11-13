@@ -18,6 +18,7 @@ import '../domain/reader_types.dart';
 import '../engine/reader_engine_registry.dart';
 import 'reader_material_theme.dart';
 import 'reader_controls.dart';
+import 'reader_pdf_search_panel.dart';
 import 'reader_surface.dart';
 import 'reader_contents_panel.dart';
 import 'reader_settings_panel.dart';
@@ -27,7 +28,7 @@ import 'reader_theme_data.dart';
 import 'reader_ui_builders.dart';
 import '../domain/reader_selection.dart';
 
-enum _ReaderPanel { none, tableOfContents, settings }
+enum _ReaderPanel { none, tableOfContents, settings, search }
 
 final class PapyrusReader extends StatefulWidget {
   const PapyrusReader({
@@ -107,6 +108,9 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
   );
   FocusNode? _widePanelOpener;
   final FocusNode _readerFocusNode = FocusNode(debugLabel: 'reader navigation');
+  final FocusNode _pdfSearchFocusNode = FocusNode(
+    debugLabel: 'PDF search input',
+  );
 
   ReaderActivityEvent? _lastActivity;
   bool _activityReportScheduled = false;
@@ -156,7 +160,66 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
     }
   }
 
+  void _openPdfSearch() {
+    _dismissCompactPanel();
+    if (_panel != _ReaderPanel.search) {
+      _widePanelOpener = FocusManager.instance.primaryFocus;
+    }
+    setState(() {
+      _controlsVisible = true;
+      _panel = _ReaderPanel.search;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _panel == _ReaderPanel.search) {
+        _pdfSearchFocusNode.requestFocus();
+      }
+    });
+    _reportActivity();
+  }
+
+  void _zoomPdf(double change) {
+    _enqueueCommand((controller) async {
+      final tools = controller.pdfTools;
+      if (tools != null) await tools.setZoom(tools.zoom + change);
+    }, context: 'while adjusting PDF zoom');
+  }
+
+  void _scrollPdf(double distance) {
+    if (_panel != _ReaderPanel.none || _compactPanelRoute != null) return;
+    _enqueueCommand((controller) async {
+      await controller.pdfTools?.scrollVertically(distance);
+    }, context: 'while scrolling the PDF');
+  }
+
   Map<ShortcutActivator, VoidCallback> get _keyBindings => {
+    if (_controller.pdfTools != null) ...{
+      const SingleActivator(LogicalKeyboardKey.arrowUp): () => _scrollPdf(-25),
+      const SingleActivator(LogicalKeyboardKey.arrowDown): () => _scrollPdf(25),
+      const SingleActivator(LogicalKeyboardKey.equal, control: true): () =>
+          _zoomPdf(.05),
+      const SingleActivator(LogicalKeyboardKey.equal, meta: true): () =>
+          _zoomPdf(.05),
+      const SingleActivator(
+        LogicalKeyboardKey.equal,
+        control: true,
+        shift: true,
+      ): () =>
+          _zoomPdf(.05),
+      const SingleActivator(
+        LogicalKeyboardKey.equal,
+        meta: true,
+        shift: true,
+      ): () =>
+          _zoomPdf(.05),
+      const SingleActivator(LogicalKeyboardKey.minus, control: true): () =>
+          _zoomPdf(-.05),
+      const SingleActivator(LogicalKeyboardKey.minus, meta: true): () =>
+          _zoomPdf(-.05),
+      const SingleActivator(LogicalKeyboardKey.keyF, control: true):
+          _openPdfSearch,
+      const SingleActivator(LogicalKeyboardKey.keyF, meta: true):
+          _openPdfSearch,
+    },
     const SingleActivator(LogicalKeyboardKey.escape): _toggleControls,
     const SingleActivator(LogicalKeyboardKey.arrowLeft): _goPrevious,
     const SingleActivator(LogicalKeyboardKey.pageUp): _goPrevious,
@@ -373,6 +436,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
     _widePanelFocusNode.dispose();
     HardwareKeyboard.instance.removeHandler(_handleUnfocusedReadingKey);
     _readerFocusNode.dispose();
+    _pdfSearchFocusNode.dispose();
     _commandRevision.dispose();
     super.dispose();
   }
@@ -560,7 +624,12 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
     // restoring the view focus that removal of the toolbar can blur.
     await WidgetsBinding.instance.endOfFrame;
     await WidgetsBinding.instance.endOfFrame;
-    if (!mounted || _controller.snapshot.status != ReaderStatus.ready) return;
+    if (!mounted ||
+        _controller.snapshot.status != ReaderStatus.ready ||
+        _panel != _ReaderPanel.none ||
+        _compactPanelRoute != null) {
+      return;
+    }
     WidgetsBinding.instance.platformDispatcher.requestViewFocusChange(
       viewId: View.of(context).viewId,
       state: ui.ViewFocusState.focused,
@@ -577,6 +646,10 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final isWide = constraints.maxWidth >= theme.compactBreakpoint;
+        final compactPdf =
+            _controller.pdfTools != null &&
+            constraints.maxWidth <
+                800 * MediaQuery.textScalerOf(context).scale(1);
         final toolbarContext = ReaderToolbarContext(
           document: widget.document,
           snapshot: snapshot,
@@ -584,6 +657,8 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
           isBusy: _isCommandBusy,
           toggleControls: _toggleControls,
           controlsVisible: _controlsVisible,
+          actionsInMenu: compactPdf,
+          openSearch: _controller.pdfTools == null ? null : _openPdfSearch,
           openTableOfContents: () =>
               _openPanel(context, _ReaderPanel.tableOfContents, isWide, theme),
           openSettings: () =>
@@ -629,7 +704,9 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
                                 progress:
                                     _dragProgress ??
                                     _progressOf(snapshot.locator),
-                                locationLabel: snapshot.locationLabel,
+                                locationLabel: _controller.pdfTools == null
+                                    ? snapshot.locationLabel
+                                    : null,
                                 onProgressChangeStart: _startProgressDrag,
                                 onProgressChanged: (value) => setState(() {
                                   _draggingProgress = true;
@@ -666,6 +743,9 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
                                       ReaderToolbar(
                                         document: widget.document,
                                         actions: actions,
+                                        pdfTools: _controller.pdfTools,
+                                        compactPdf: compactPdf,
+                                        onSearch: _openPdfSearch,
                                         onBack: widget.onBack,
                                         onTableOfContents: () => _openPanel(
                                           context,
@@ -698,7 +778,8 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
                             ),
                           ),
                         ),
-                        if (isWide && _panel != _ReaderPanel.none)
+                        if ((isWide || _panel == _ReaderPanel.search) &&
+                            _panel != _ReaderPanel.none)
                           Expanded(
                             child: Stack(
                               children: [
@@ -716,7 +797,13 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
                                   top: 0,
                                   bottom: 0,
                                   end: 0,
-                                  width: theme.sidePanelWidth,
+                                  width:
+                                      _panel == _ReaderPanel.search && !isWide
+                                      ? constraints.maxWidth
+                                      : math.min(
+                                          constraints.maxWidth,
+                                          theme.sidePanelWidth,
+                                        ),
                                   child: FocusTraversalOrder(
                                     order: const NumericFocusOrder(2),
                                     child: _overlayBar(
@@ -875,6 +962,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
 
     final opener = _widePanelOpener;
     setState(() => _panel = _ReaderPanel.none);
+    _reportActivity();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && opener?.canRequestFocus == true) {
         opener!.requestFocus();
@@ -888,6 +976,10 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
     bool isWide,
     ReaderThemeData theme,
   ) {
+    if (!isWide && _panel == _ReaderPanel.search) {
+      setState(() => _panel = _ReaderPanel.none);
+    }
+
     if (isWide) {
       if (_panel == panel) {
         _closeWidePanel();
@@ -1125,6 +1217,14 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
                 context: 'while updating reader preferences',
               ),
             ),
+      _ReaderPanel.search => ReaderPdfSearchPanel(
+        tools: _controller.pdfTools!,
+        focusNode: _pdfSearchFocusNode,
+        emptyBuilder: widget.builders.searchEmpty,
+        close: close,
+        closeOnSelection:
+            MediaQuery.sizeOf(context).width < theme.compactBreakpoint,
+      ),
       _ReaderPanel.none => const SizedBox.shrink(),
     };
   }
@@ -1265,7 +1365,10 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
               (isCurrent?.call() ?? true) &&
               generation == _commandGeneration &&
               _panel == _ReaderPanel.none &&
-              _compactPanelRoute == null) {
+              _compactPanelRoute == null &&
+              !_readerFocusNode.hasFocus) {
+            // Keep focus inside the viewport when it survived navigation;
+            // moving it to the shell disconnects engine keyboard handlers.
             _readerFocusNode.requestFocus();
           }
         });

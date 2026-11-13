@@ -1,5 +1,7 @@
 import 'package:flutter/widgets.dart';
 
+import '../domain/pdf_reader_tools.dart';
+
 import '../domain/reader_capabilities.dart';
 import '../domain/reader_document.dart';
 import '../domain/reader_locator.dart';
@@ -13,6 +15,8 @@ abstract class ReaderEngine extends ChangeNotifier {
   ReaderCapabilities get capabilities;
 
   ReaderSnapshot get snapshot;
+
+  PdfReaderTools? get pdfTools => null;
 
   Widget buildViewport(BuildContext context);
 

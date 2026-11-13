@@ -11,6 +11,7 @@ import '../../domain/reader_preferences.dart';
 import '../../domain/reader_snapshot.dart';
 import '../../domain/reader_toc_entry.dart';
 import '../../domain/reader_types.dart';
+import '../../domain/pdf_reader_tools.dart';
 import '../reader_engine.dart';
 import 'pdf_facade.dart';
 import '../epub/worker/epub_worker.dart';
@@ -35,7 +36,9 @@ final class PdfReaderEngine extends ReaderEngine {
   };
 
   @override
-  ReaderCapabilities get capabilities => const ReaderCapabilities(
+  ReaderCapabilities get capabilities => ReaderCapabilities(
+    supportsLinkHighlighting:
+        _document?.format == ReaderFormat.pdf && _facade is PdfReaderTools,
     supportsPagination: true,
     supportsScrolling: true,
     supportsTextCustomization: false,
@@ -46,6 +49,10 @@ final class PdfReaderEngine extends ReaderEngine {
   ReaderSnapshot snapshot = const ReaderIdleSnapshot();
 
   PdfFacade? _facade;
+
+  @override
+  PdfReaderTools? get pdfTools =>
+      _facade is PdfReaderTools ? _facade as PdfReaderTools : null;
   ReaderDocument? _document;
   ReaderPreferences _preferences = const ReaderPreferences();
   PdfReaderLocator? _locator;
@@ -116,6 +123,9 @@ final class PdfReaderEngine extends ReaderEngine {
             bytes,
             sourceName: document.id,
             preserveColors: document.format != ReaderFormat.pdf,
+            initialView: document.initialPdfView,
+            onViewChanged: document.onPdfViewChanged,
+            onOpenLink: document.onOpenLink,
           );
       final facade = await factory(bytes);
       candidate = facade;
@@ -414,6 +424,7 @@ final class PdfReaderEngine extends ReaderEngine {
             backgroundColor: _preferences.backgroundColor,
             brightness: _preferences.brightness,
             layoutMode: _preferences.layoutMode,
+            highlightLinks: _preferences.highlightLinks,
             onPageChanged: _visiblePageChanged,
             onPositionChanged: _visiblePositionChanged,
             onVisiblePagesChanged: _visiblePagesChanged,

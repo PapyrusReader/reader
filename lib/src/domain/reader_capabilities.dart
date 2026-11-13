@@ -5,6 +5,7 @@ final class ReaderCapabilities {
     this.supportsTextCustomization = false,
     this.supportsColumnMode = false,
     this.supportsPageTurnAnimation = false,
+    this.supportsLinkHighlighting = false,
   });
 
   final bool supportsPagination;
@@ -12,6 +13,7 @@ final class ReaderCapabilities {
   final bool supportsTextCustomization;
   final bool supportsColumnMode;
   final bool supportsPageTurnAnimation;
+  final bool supportsLinkHighlighting;
 
   @override
   bool operator ==(Object other) =>
@@ -21,7 +23,8 @@ final class ReaderCapabilities {
           supportsScrolling == other.supportsScrolling &&
           supportsTextCustomization == other.supportsTextCustomization &&
           supportsColumnMode == other.supportsColumnMode &&
-          supportsPageTurnAnimation == other.supportsPageTurnAnimation;
+          supportsPageTurnAnimation == other.supportsPageTurnAnimation &&
+          supportsLinkHighlighting == other.supportsLinkHighlighting;
 
   @override
   int get hashCode => Object.hash(
@@ -30,5 +33,6 @@ final class ReaderCapabilities {
     supportsTextCustomization,
     supportsColumnMode,
     supportsPageTurnAnimation,
+    supportsLinkHighlighting,
   );
 }

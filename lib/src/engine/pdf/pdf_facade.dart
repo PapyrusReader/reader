@@ -13,6 +13,8 @@ import '../../presentation/reader_interaction_scope.dart';
 import '../../presentation/reader_swipe_tracker.dart';
 import '../../presentation/reader_highlight_interaction.dart';
 import 'pdf_selection_toolbar.dart';
+import 'pdf_selection_handles.dart';
+import '../../domain/pdf_reader_tools.dart';
 
 enum PdfFacadeError { invalid, encrypted }
 
@@ -43,6 +45,7 @@ final class PdfViewportConfiguration {
     required this.brightness,
     required this.layoutMode,
     required this.onPageChanged,
+    this.highlightLinks = true,
     this.onPositionChanged,
     this.onVisiblePagesChanged,
     this.onContentReadyChanged,
@@ -50,6 +53,7 @@ final class PdfViewportConfiguration {
 
   final int pageIndex;
   final bool facingPages;
+  final bool highlightLinks;
   final Color backgroundColor;
   final Brightness brightness;
   final ReaderLayoutMode layoutMode;
@@ -91,6 +95,9 @@ Future<PdfFacade> createPdfrxFacade(
   Uint8List bytes, {
   required String sourceName,
   bool preserveColors = false,
+  PdfViewState? initialView,
+  ValueChanged<PdfViewState>? onViewChanged,
+  Future<void> Function(Uri)? onOpenLink,
   PdfMetadataDocumentLoader? metadataDocumentLoader,
 }) async {
   final reference = PdfDocumentRefData(
@@ -116,6 +123,9 @@ Future<PdfFacade> createPdfrxFacade(
     final facade = _PdfrxFacade(
       documentRef: reference,
       preserveColors: preserveColors,
+      initialView: initialView,
+      onViewChanged: onViewChanged,
+      onOpenLink: onOpenLink,
       pageCount: metadataDocument.pageCount,
       outline: List.unmodifiable(outline),
       releaseDocument: releaseDocument,
@@ -166,20 +176,273 @@ PdfFacadeOutlineEntry _convertOutline(PdfOutlineNode node) {
   );
 }
 
-final class _PdfrxFacade implements PdfFacade, DisposablePdfFacade {
+final class _PdfrxFacade extends PdfReaderTools
+    implements PdfFacade, DisposablePdfFacade {
   _PdfrxFacade({
     required PdfDocumentRef documentRef,
     this.preserveColors = false,
+    PdfViewState? initialView,
+    this.onViewChanged,
+    this.onOpenLink,
     required this.pageCount,
     required this.outline,
     VoidCallback? releaseDocument,
   }) : _documentRef = documentRef,
-       _releaseDocument = releaseDocument {
+       _releaseDocument = releaseDocument,
+       _savedView = initialView,
+       _fitMode = initialView?.fitMode {
     _controller.addListener(_positionChanged);
+    _searcher = PdfTextSearchSession(_controller)..addListener(_searchChanged);
   }
 
   final PdfDocumentRef _documentRef;
   final bool preserveColors;
+  final ValueChanged<PdfViewState>? onViewChanged;
+  final Future<void> Function(Uri)? onOpenLink;
+  late final PdfTextSearchSession _searcher;
+  PdfViewState? _savedView;
+  PdfFitMode? _fitMode;
+  final List<PdfViewState> _history = [];
+  final List<PdfViewState> _forwardHistory = [];
+  Timer? _saveTimer;
+  String _query = '';
+  List<PdfSearchMatch> _matches = const [];
+  bool _applyingView = false;
+
+  @override
+  bool get isReady => !_disposed && _controller.isReady && !_restoring;
+  @override
+  int get pageNumber => _pageIndex + 1;
+  @override
+  double get zoom => _controller.isReady ? _controller.currentZoom : 1;
+  @override
+  double get minimumZoom => .1;
+  @override
+  double get maximumZoom => 8;
+  @override
+  bool get canReturn => _history.isNotEmpty;
+  @override
+  bool get canGoForward => _forwardHistory.isNotEmpty;
+  @override
+  bool get searching => _searcher.isSearching;
+  @override
+  String get query => _query;
+  @override
+  int? get currentMatch => _searcher.currentIndex;
+  @override
+  List<PdfSearchMatch> get matches => _matches;
+
+  void _searchChanged() {
+    if (_disposed) return;
+    _matches = List.unmodifiable([
+      for (final match in _searcher.matches)
+        PdfSearchMatch(
+          pageNumber: match.pageNumber,
+          text: match.contextText.replaceAll(RegExp(r'\s+'), ' '),
+        ),
+    ]);
+    if (_controller.isReady) _controller.invalidate();
+    notifyListeners();
+  }
+
+  @override
+  void search(String query) {
+    _query = query.trim();
+    if (_query.isEmpty) {
+      _searcher.resetTextSearch();
+    } else {
+      _searcher.startTextSearch(
+        _query,
+        goToFirstMatch: false,
+        startPageNumber: pageNumber,
+      );
+    }
+  }
+
+  void _rememberLocation(PdfViewState? previous) {
+    final current = _captureView();
+    if (previous == null || current == null) return;
+    if (previous.pageIndex == current.pageIndex &&
+        (previous.zoom - current.zoom).abs() < .000001 &&
+        (previous.centerX - current.centerX).abs() < .000001 &&
+        (previous.centerY - current.centerY).abs() < .000001) {
+      return;
+    }
+
+    _history.add(previous);
+    _forwardHistory.clear();
+  }
+
+  @override
+  Future<void> selectMatch(int index) async {
+    if (!isReady || index < 0 || index >= _searcher.matches.length) return;
+    final previous = _captureView();
+    final match = _searcher.matches[index];
+    _pageIndex = match.pageNumber - 1;
+    _fitMode = PdfFitMode.custom;
+    final rect = _controller.calcRectForRectInsidePage(
+      pageNumber: match.pageNumber,
+      rect: match.bounds,
+    );
+    await _controller.setZoom(rect.center, zoom, duration: Duration.zero);
+    await _searcher.goToMatchOfIndex(index);
+    _rememberLocation(previous);
+    _positionChanged();
+  }
+
+  @override
+  Future<void> goToPage(int pageNumber) async {
+    if (!isReady) return;
+    RangeError.checkValueInInterval(pageNumber, 1, pageCount, 'pageNumber');
+    await showPage(pageNumber - 1, 0);
+    _positionChanged();
+  }
+
+  @override
+  Future<void> returnToPrevious() => _restoreHistory(_history, _forwardHistory);
+
+  @override
+  Future<void> goForward() => _restoreHistory(_forwardHistory, _history);
+
+  Future<void> _restoreHistory(
+    List<PdfViewState> source,
+    List<PdfViewState> destination,
+  ) async {
+    if (!isReady || source.isEmpty) return;
+    final current = _captureView();
+    if (current == null) return;
+    final target = source.last;
+    _savedView = target;
+    _fitMode = target.fitMode;
+    _pageIndex = target.pageIndex;
+    await _restorePage(restoreLocation: true);
+    source.removeLast();
+    destination.add(current);
+    _positionChanged();
+  }
+
+  @override
+  Future<void> setZoom(double value) async {
+    if (!isReady || !value.isFinite) return;
+    _fitMode = PdfFitMode.custom;
+    await _controller.setZoom(
+      _controller.visibleRect.center,
+      value.clamp(minimumZoom, maximumZoom),
+      duration: Duration.zero,
+    );
+    _positionChanged();
+  }
+
+  @override
+  Future<void> scrollVertically(double distance) async {
+    if (!isReady || !distance.isFinite) return;
+    await _controller.goTo(
+      _controller.calcMatrixFor(
+        _controller.visibleRect.center + Offset(0, distance),
+        zoom: zoom,
+      ),
+      duration: Duration.zero,
+    );
+    _positionChanged();
+  }
+
+  @override
+  Future<void> fitPage() => _fit(PdfFitMode.page);
+  @override
+  Future<void> fitWidth() => _fit(PdfFitMode.width);
+
+  Future<void> _fit(PdfFitMode mode) async {
+    if (!isReady) return;
+    _fitMode = mode;
+    _savedView = null;
+    await _restorePage();
+    _positionChanged();
+  }
+
+  Future<void> _openLink(PdfLink link) async {
+    if (!isReady) return;
+    if (link.dest case final destination?) {
+      if (destination.pageNumber < 1 || destination.pageNumber > pageCount) {
+        return;
+      }
+      final previous = _captureView();
+      _pageIndex = destination.pageNumber - 1;
+      _fitMode = PdfFitMode.custom;
+      await _controller.goToDest(destination, duration: Duration.zero);
+      _rememberLocation(previous);
+      _positionChanged();
+    } else if (link.url case final uri?) {
+      await onOpenLink?.call(uri);
+    }
+  }
+
+  PdfViewerHandleLinkTap? _handleLinkTap;
+  final Set<int> _linkPointers = {};
+  PointerDownEvent? _linkStart;
+  bool _linkTapHandled = false;
+
+  void _startLinkTap(PointerDownEvent event) {
+    _linkPointers.add(event.pointer);
+    _linkTapHandled = false;
+    _linkStart =
+        _linkPointers.length == 1 &&
+            event.buttons == kPrimaryButton &&
+            isReady &&
+            !_controller.textSelectionDelegate.hasSelectedText
+        ? event
+        : null;
+  }
+
+  void _moveLinkTap(PointerMoveEvent event) {
+    final start = _linkStart;
+    if (start == null || event.pointer != start.pointer) return;
+    final slop = start.kind == PointerDeviceKind.mouse
+        ? kPrecisePointerHitSlop
+        : kTouchSlop;
+
+    if ((event.position - start.position).distance > slop) {
+      _linkStart = null;
+    }
+  }
+
+  void _endLinkTap(PointerUpEvent event) {
+    _linkPointers.remove(event.pointer);
+    final start = _linkStart;
+    _linkStart = null;
+
+    if (start == null ||
+        event.pointer != start.pointer ||
+        _linkPointers.isNotEmpty ||
+        event.timeStamp - start.timeStamp >= kLongPressTimeout ||
+        !isReady ||
+        _controller.textSelectionDelegate.hasSelectedText) {
+      return;
+    }
+
+    // Dispatch links on release instead of waiting for pdfrx's double-tap timer.
+    _linkTapHandled = _handleLinkTap?.call(event.localPosition) ?? false;
+  }
+
+  void _cancelLinkTap(PointerCancelEvent event) {
+    _linkPointers.remove(event.pointer);
+    _linkStart = null;
+  }
+
+  PdfViewState? _captureView() {
+    if (!_controller.isReady || _configuration == null || _restoring) {
+      return null;
+    }
+    final page = _controller.layout.pageLayouts[_pageIndex];
+    final center = _controller.visibleRect.center;
+    return PdfViewState(
+      pageIndex: _pageIndex,
+      zoom: zoom.clamp(.1, 8),
+      centerX: ((center.dx - page.left) / page.width).clamp(0, 1),
+      centerY: ((center.dy - page.top) / page.height).clamp(0, 1),
+      fitMode: _fitMode ?? PdfFitMode.page,
+    );
+  }
+
   final PdfViewerController _controller = PdfViewerController();
   int _pageIndex = 0;
   double _pageOffset = 0;
@@ -202,15 +465,19 @@ final class _PdfrxFacade implements PdfFacade, DisposablePdfFacade {
 
   @override
   Future<void> showPage(int pageIndex, double pageOffset) async {
+    final previous = _captureView();
     _pageIndex = pageIndex;
     _pageOffset = pageOffset;
     if (_controller.isReady && !_restoring) {
+      _savedView = null;
       _restoring = true;
       try {
         await _restorePage();
       } finally {
         _restoring = false;
       }
+      _rememberLocation(previous);
+      _positionChanged();
     }
   }
 
@@ -221,41 +488,55 @@ final class _PdfrxFacade implements PdfFacade, DisposablePdfFacade {
   );
 
   double get _fitZoom => min(
-    (_controller.viewSize.width - 16) / _spread.width,
-    (_controller.viewSize.height - 16) / _spread.height,
+    _controller.viewSize.width / _spread.width,
+    _controller.viewSize.height / _spread.height,
   );
 
   bool get _atFit =>
       _controller.isReady && _controller.currentZoom <= _fitZoom * 1.02;
 
-  Future<void> _restorePage() {
+  double _zoomFor(PdfFitMode mode) => switch (mode) {
+    PdfFitMode.page => _fitZoom,
+    PdfFitMode.width => _controller.viewSize.width / _spread.width,
+    PdfFitMode.custom => _savedView?.zoom ?? zoom,
+  };
+
+  Future<void> _restorePage({bool restoreLocation = false}) async {
     final config = _configuration;
-    if (config == null) return Future<void>.value();
-    final rect = _spread;
-    if (config.layoutMode == ReaderLayoutMode.paginated) {
-      return _controller.goTo(
-        _controller.calcMatrixForRect(rect, margin: 8),
-        duration: Duration.zero,
+    if (config == null) return;
+    _fitMode ??= config.layoutMode == ReaderLayoutMode.paginated
+        ? PdfFitMode.page
+        : PdfFitMode.width;
+    final scale = _zoomFor(_fitMode!).clamp(.1, 8.0);
+    final page = _controller.layout.pageLayouts[_pageIndex];
+    final saved = _savedView;
+    final Offset center;
+    if (saved != null &&
+        saved.pageIndex == _pageIndex &&
+        (restoreLocation || _fitMode != PdfFitMode.page)) {
+      center = Offset(
+        page.left + page.width * saved.centerX,
+        page.top + page.height * saved.centerY,
+      );
+    } else if (_fitMode == PdfFitMode.page) {
+      center = _spread.center;
+    } else {
+      center = Offset(
+        _spread.center.dx,
+        page.top +
+            page.height * _pageOffset +
+            _controller.viewSize.height / (2 * scale),
       );
     }
-    // Include pdfrx's document margins in the width fit. Fitting only the page
-    // makes scaled margins wider than the viewport and permits horizontal pan.
-    // Keep the page-local offset while refitting columns or available space.
-    final documentWidth = _controller.layout.documentSize.width;
-    final zoom = (_controller.viewSize.width / documentWidth).clamp(.1, 8.0);
-    final page = _controller.layout.pageLayouts[_pageIndex];
-    return _controller.goTo(
-      _controller.calcMatrixFor(
-        Offset(
-          documentWidth / 2,
-          page.top +
-              page.height * _pageOffset +
-              _controller.viewSize.height / (2 * zoom),
-        ),
-        zoom: zoom,
-      ),
-      duration: Duration.zero,
-    );
+    _applyingView = true;
+    try {
+      await _controller.goTo(
+        _controller.calcMatrixFor(center, zoom: scale),
+        duration: Duration.zero,
+      );
+    } finally {
+      _applyingView = false;
+    }
   }
 
   void _turnSpread(int direction) {
@@ -329,6 +610,13 @@ final class _PdfrxFacade implements PdfFacade, DisposablePdfFacade {
 
   @override
   Widget buildViewport(PdfViewportConfiguration configuration) {
+    if (_configuration != null &&
+        _configuration!.layoutMode != configuration.layoutMode &&
+        _fitMode != PdfFitMode.custom) {
+      _fitMode = configuration.layoutMode == ReaderLayoutMode.paginated
+          ? PdfFitMode.page
+          : PdfFitMode.width;
+    }
     _configuration = configuration;
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -382,10 +670,20 @@ final class _PdfrxFacade implements PdfFacade, DisposablePdfFacade {
               });
               WidgetsBinding.instance.scheduleFrame();
             },
-            onPointerDown: _swipe.start,
-            onPointerMove: _swipe.update,
-            onPointerCancel: _swipe.cancel,
+            onPointerDown: (event) {
+              _swipe.start(event);
+              _startLinkTap(event);
+            },
+            onPointerMove: (event) {
+              _swipe.update(event);
+              _moveLinkTap(event);
+            },
+            onPointerCancel: (event) {
+              _swipe.cancel(event);
+              _cancelLinkTap(event);
+            },
             onPointerUp: (event) {
+              _endLinkTap(event);
               final offset = _swipe.end(event);
 
               if (configuration.layoutMode == ReaderLayoutMode.paginated &&
@@ -443,6 +741,37 @@ final class _PdfrxFacade implements PdfFacade, DisposablePdfFacade {
                   params: buildPdfViewerParams(
                     configuration,
                     viewportSize: size,
+                    viewerController: _controller,
+                    searchPainter: _searcher.pageTextMatchPaintCallback,
+                    viewerOverlayBuilder: (_, _, handleLinkTap) {
+                      _handleLinkTap = handleLinkTap;
+                      return const [];
+                    },
+                    onGeneralTap: (_, _, _) {
+                      final handled = _linkTapHandled;
+                      _linkTapHandled = false;
+                      return handled;
+                    },
+                    onLink: (link) {
+                      // Consume the later classified tap after an immediate jump.
+                      if (_linkTapHandled) {
+                        _linkTapHandled = false;
+                        return;
+                      }
+
+                      ReaderInteractionScope.maybeOf(context)?.suppressTap();
+                      unawaited(
+                        _openLink(link).catchError((Object error) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                              const SnackBar(
+                                content: Text('Could not open this link.'),
+                              ),
+                            );
+                          }
+                        }),
+                      );
+                    },
                     customizeContextMenuItems: (params, items) {
                       if (!params.textSelectionDelegate.hasSelectedText ||
                           !params.textSelectionDelegate.isCopyAllowed) {
@@ -508,6 +837,15 @@ final class _PdfrxFacade implements PdfFacade, DisposablePdfFacade {
     );
   }
 
+  int _centerPageIndex() {
+    final center = _controller.visibleRect.center;
+    final pages = _controller.layout.pageLayouts;
+    for (var index = 0; index < pages.length; index++) {
+      if (pages[index].contains(center)) return index;
+    }
+    return ((_controller.pageNumber ?? 1) - 1).clamp(0, pageCount - 1);
+  }
+
   void _positionChanged() {
     if (_disposed || _restoring || _scheduled || !_controller.isReady) return;
     _scheduled = true;
@@ -517,7 +855,7 @@ final class _PdfrxFacade implements PdfFacade, DisposablePdfFacade {
       final config = _configuration;
       final index = config?.layoutMode == ReaderLayoutMode.paginated
           ? _pageIndex
-          : ((_controller.pageNumber ?? 1) - 1).clamp(0, pageCount - 1);
+          : _centerPageIndex();
       final page = _controller.layout.pageLayouts[index];
       final offset = config?.layoutMode == ReaderLayoutMode.paginated && _atFit
           ? 0.0
@@ -534,6 +872,20 @@ final class _PdfrxFacade implements PdfFacade, DisposablePdfFacade {
       config?.onContentReadyChanged?.call(exposure.contentVisible);
       _pageIndex = index;
       _pageOffset = offset;
+      if (!_applyingView &&
+          _fitMode != null &&
+          _fitMode != PdfFitMode.custom &&
+          (zoom - _zoomFor(_fitMode!)).abs() > .01) {
+        _fitMode = PdfFitMode.custom;
+      }
+      _savedView = _captureView();
+      _saveTimer?.cancel();
+      if (onViewChanged != null) {
+        _saveTimer = Timer(const Duration(milliseconds: 250), () {
+          if (!_disposed && _savedView != null) onViewChanged!(_savedView!);
+        });
+      }
+      notifyListeners();
       if (config?.onPositionChanged != null) {
         config!.onPositionChanged!(index, offset);
       } else {
@@ -546,10 +898,14 @@ final class _PdfrxFacade implements PdfFacade, DisposablePdfFacade {
   @override
   void dispose() {
     if (_disposed) return;
+    _saveTimer?.cancel();
+    if (_savedView != null) onViewChanged?.call(_savedView!);
     _disposed = true;
+    _searcher.dispose();
     _controller.removeListener(_positionChanged);
     _releaseDocument?.call();
     _configuration = null;
+    super.dispose();
   }
 }
 
@@ -599,6 +955,7 @@ ReaderHighlightTarget? pdfHighlightAt(
 
 PdfViewerParams buildPdfViewerParams(
   PdfViewportConfiguration configuration, {
+  PdfViewerController? viewerController,
   PdfViewerReadyCallback? onViewerReady,
   PdfViewerTextSelectionChangeCallback? onTextSelectionChange,
   ValueChanged<int>? onPageChanged,
@@ -606,11 +963,55 @@ PdfViewerParams buildPdfViewerParams(
   int Function()? currentPageIndex,
   PdfViewerContextMenuUpdateMenuItemsFunction? customizeContextMenuItems,
   List<ReaderHighlight> highlights = const [],
+  PdfViewerPagePaintCallback? searchPainter,
+  ValueChanged<PdfLink>? onLink,
+  PdfViewerOverlaysBuilder? viewerOverlayBuilder,
+  PdfViewerGeneralTapHandler? onGeneralTap,
 }) {
   final paginated = configuration.layoutMode == ReaderLayoutMode.paginated;
+  final handles = PdfSelectionHandles(viewerController);
   return PdfViewerParams(
+    pageDropShadow: null,
+    viewerOverlayBuilder: viewerOverlayBuilder,
+    onGeneralTap: onGeneralTap,
     customizeContextMenuItems: customizeContextMenuItems,
+    scaleByPointerScale: .5,
+    scaleGestureSensitivity: 1,
+    scaleInertiaMaxExcursion: .01,
+    zoomStepsDelegateProvider: const PdfFineZoomSteps(),
+    linkHandlerParams: onLink == null
+        ? null
+        : PdfLinkHandlerParams(
+            onLinkTap: onLink,
+            customPainter: (canvas, pageRect, page, links) {
+              if (!configuration.highlightLinks) return;
+              final regions = Path();
+
+              for (final link in links) {
+                for (final rect in link.rects) {
+                  regions.addRect(
+                    rect.toRectInDocument(page: page, pageRect: pageRect),
+                  );
+                }
+              }
+
+              // One non-zero fill keeps overlapping link regions equally tinted.
+              canvas.drawPath(
+                regions,
+                Paint()..color = Colors.blue.withAlpha(50),
+              );
+            },
+          ),
     pagePaintCallbacks: [
+      (canvas, pageRect, page) => canvas.drawRect(
+        pageRect,
+        Paint()
+          ..color = const Color(0xffbdbdbd)
+          ..style = PaintingStyle.stroke
+          // Hairline strokes stay one physical pixel wide at every zoom level.
+          ..strokeWidth = 0,
+      ),
+      ?searchPainter,
       (canvas, pageRect, page) {
         for (final highlight in highlights) {
           for (final rectangle in highlight.selection.rectangles) {
@@ -633,6 +1034,8 @@ PdfViewerParams buildPdfViewerParams(
       },
     ],
     textSelectionParams: PdfTextSelectionParams(
+      buildSelectionHandle: handles.build,
+      calcSelectionHandleOffset: handles.offset,
       onTextSelectionChange: onTextSelectionChange,
     ),
     backgroundColor: configuration.brightness == Brightness.dark
@@ -645,6 +1048,9 @@ PdfViewerParams buildPdfViewerParams(
         : configuration.backgroundColor,
     annotationRenderingMode: PdfAnnotationRenderingMode.annotationAndForms,
     panAxis: PanAxis.free,
+    // The layout's outer margin separates pages vertically, but must not add
+    // horizontal travel beyond the document edges when fitting its width.
+    boundaryMargin: const EdgeInsets.symmetric(horizontal: -8),
     layoutPages: paginated
         ? (pages, params) => buildPaginatedPdfLayout(
             [for (final page in pages) Size(page.width, page.height)],
@@ -670,11 +1076,7 @@ PdfViewerParams buildPdfViewerParams(
               currentPageIndex?.call() ?? configuration.pageIndex,
               configuration.facingPages,
             );
-            final fit = min(
-              (viewSize.width - 16) / rect.width,
-              (viewSize.height - 16) / rect.height,
-            );
-            final zoom = matrix.zoom.clamp(fit.clamp(.1, 8.0), 8.0).toDouble();
+            final zoom = matrix.zoom.clamp(.1, 8.0).toDouble();
             final visible = matrix.calcVisibleRect(viewSize);
             double clampCenter(
               double center,
@@ -688,14 +1090,14 @@ PdfViewerParams buildPdfViewerParams(
               Offset(
                 clampCenter(
                   visible.center.dx,
-                  rect.left - 8,
-                  rect.right + 8,
+                  rect.left,
+                  rect.right,
                   viewSize.width / (2 * zoom),
                 ),
                 clampCenter(
                   visible.center.dy,
-                  rect.top - 8,
-                  rect.bottom + 8,
+                  rect.top,
+                  rect.bottom,
                   viewSize.height / (2 * zoom),
                 ),
               ),
@@ -807,11 +1209,8 @@ PdfPageLayout buildPaginatedPdfLayout(
   final layouts = <Rect>[];
   var y = 0.0;
   for (final row in rows) {
-    final zoom = min(
-      max(1, viewportSize.width - margin * 2) / row.width,
-      max(1, viewportSize.height - margin * 2) / row.height,
-    );
-    final slotHeight = max(row.height + margin * 2, viewportSize.height / zoom);
+    // Keep adjacent spreads outside the viewport even at the minimum zoom.
+    final slotHeight = max(row.height + margin * 2, viewportSize.height / .1);
     final left = (documentWidth - row.width) / 2;
     final top = y + (slotHeight - row.height) / 2;
     layouts.add(
@@ -868,4 +1267,46 @@ PdfPageLayout _facingLayout(List<PdfPage> pages, PdfViewerParams params) {
     pageLayouts: layouts,
     documentSize: Size(documentWidth, y),
   );
+}
+
+/// Five-percentage-point keyboard steps instead of doubling the document scale.
+final class PdfFineZoomSteps extends PdfViewerZoomStepsDelegateProvider {
+  const PdfFineZoomSteps();
+
+  @override
+  PdfViewerZoomStepsDelegate create() => _PdfFineZoomDelegate();
+  @override
+  bool operator ==(Object other) => other is PdfFineZoomSteps;
+  @override
+  int get hashCode => runtimeType.hashCode;
+}
+
+final class _PdfFineZoomDelegate implements PdfViewerZoomStepsDelegate {
+  @override
+  void dispose() {}
+
+  @override
+  List<double> generateZoomStops(PdfViewerLayoutMetrics metrics) {
+    final stops = <double>{
+      metrics.minScale,
+      metrics.maxScale,
+      metrics.coverScale,
+    };
+    if (metrics.alternativeFitScale != null) {
+      stops.add(metrics.alternativeFitScale!);
+    }
+    for (
+      var percent = (metrics.minScale * 100 / 5).ceil() * 5;
+      percent <= metrics.maxScale * 100;
+      percent += 5
+    ) {
+      stops.add(percent / 100);
+    }
+    return stops
+        .where(
+          (scale) => scale >= metrics.minScale && scale <= metrics.maxScale,
+        )
+        .toList()
+      ..sort();
+  }
 }
