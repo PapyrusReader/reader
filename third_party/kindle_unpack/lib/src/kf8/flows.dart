@@ -98,13 +98,7 @@ class BookFlows {
         );
       }
       final slice = Uint8List.sublistView(rawML, entry.start, entry.end);
-      out.add(
-        FlowSection(
-          index: i,
-          kind: _classify(slice),
-          bytes: slice,
-        ),
-      );
+      out.add(FlowSection(index: i, kind: _classify(slice), bytes: slice));
     }
     return BookFlows(flows: List<FlowSection>.unmodifiable(out));
   }
@@ -117,18 +111,15 @@ class BookFlows {
     }
     if (i >= bytes.length) return FlowKind.other;
     final scanLen = (bytes.length - i).clamp(0, 256);
-    final head = latin1.decode(
-      Uint8List.sublistView(bytes, i, i + scanLen),
-    );
+    final head = latin1.decode(Uint8List.sublistView(bytes, i, i + scanLen));
 
     if (head.startsWith('<')) {
       // Likely an XML / HTML / SVG start.
-      final lc = head.toLowerCase();
-      if (lc.contains('<svg')) return FlowKind.svg;
-      if (lc.contains('<html') ||
-          lc.contains('<?xml') && lc.contains('<head')) {
-        return FlowKind.html;
-      }
+      final root = RegExp(
+        r'<([a-z][\w:.-]*)(?:\s|/?>)',
+        caseSensitive: false,
+      ).firstMatch(head)?.group(1)?.toLowerCase();
+      if (root == 'svg') return FlowKind.svg;
       // KF8's primary flow doesn't always start with <html — older
       // ones lead with bare body fragments. Treat any '<' that isn't
       // SVG as HTML.

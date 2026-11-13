@@ -87,7 +87,11 @@ export async function checkFormats(browser, origin, reader) {
       const chooser = page.waitForEvent('filechooser');
       await page.getByRole('button', { name: 'Open a book', exact: true }).click();
       await (await chooser).setFiles({ name: `book.${format}`, mimeType: 'application/octet-stream', buffer: bytes });
-      await page.waitForTimeout(1200);
+      // Conversion and first layout vary by format and runner speed. Wait for
+      // the opening overlay to finish before sending the chrome-toggle tap.
+      await page.getByRole('button', { name: 'Back', exact: true }).waitFor({ timeout: 30000 });
+      await page.getByRole('progressbar').waitFor({ state: 'hidden', timeout: 60000 });
+      await page.waitForTimeout(500);
       await page.mouse.click(550, 400);
       const next = page.getByRole('button', { name: 'Next', exact: true });
       await next.waitFor({ timeout: 15000 });

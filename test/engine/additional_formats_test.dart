@@ -16,6 +16,28 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(initializePdfiumForTest);
 
+  test('KF8 HTML containing an SVG cover stays the primary HTML flow', () {
+    for (final html in [
+      '<html><body><svg xmlns="http://www.w3.org/2000/svg"></svg></body></html>',
+      '<?xml version="1.0"?><html><body><svg/></body></html>',
+      '<body><svg/></body>',
+    ]) {
+      final bytes = Uint8List.fromList(utf8.encode(html));
+      final flows = BookFlows.split(
+        bytes,
+        FdstTable(entries: [FdstEntry(start: 0, end: bytes.length)]),
+      );
+      expect(flows.primaryHtml?.bytes, bytes);
+    }
+
+    final svg = Uint8List.fromList(utf8.encode('<?xml version="1.0"?><svg/>'));
+    final flows = BookFlows.split(
+      svg,
+      FdstTable(entries: [FdstEntry(start: 0, end: svg.length)]),
+    );
+    expect(flows.flows.single.kind, FlowKind.svg);
+  });
+
   for (final format in [
     ReaderFormat.txt,
     ReaderFormat.mobi,
