@@ -65,9 +65,18 @@ are preserved in dark mode.
 
 `PdfReaderEngine` uses a `PdfFacade` so engine tests do not depend on PDFium.
 The pdfrx implementation shares one document reference between metadata inspection
-and the viewer, retaining it until disposal. Appearance changes must preserve the
-viewer and zoom. Viewport/layout changes refit the current page. pdfrx owns PDF
-rendering and text selection; the host persists the serialized locator.
+and the viewer, retaining it until disposal. Appearance changes preserve the viewer and zoom. Custom zoom and the page-local
+view center survive viewport/layout changes; fit modes adapt to the available
+space. Paginated slots isolate spreads even when zoomed out. pdfrx owns rendering,
+selection, and bounded text search. `PdfReaderTools` exposes zoom, fit, page entry,
+search, and a bounded return history to the shell without exposing PDFium types.
+
+The host persists the synchronized locator separately from `PdfViewState`, which
+is device-local view configuration. `ReaderDocument.initialPdfView` and
+`onPdfViewChanged` restore/save it; a host must scope storage to the library and
+book. External links are delegated to `ReaderDocument.onOpenLink`; the host owns
+allowed URL schemes and platform launch behavior. Internal destinations retain
+PDF coordinates. Search and link jumps retain the previous view for return.
 
 ## Shell and host presentation
 

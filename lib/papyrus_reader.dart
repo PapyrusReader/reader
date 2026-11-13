@@ -1,5 +1,7 @@
 library;
 
+export 'src/domain/pdf_reader_tools.dart';
+
 export 'src/controller/reader_controller.dart';
 export 'src/domain/reader_capabilities.dart';
 export 'src/domain/reader_activity.dart';

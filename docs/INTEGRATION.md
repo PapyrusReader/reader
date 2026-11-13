@@ -19,6 +19,29 @@ PDF stores `pageIndex`, `pageOffset` and `totalProgression`. A custom facade can
 report intra-page offsets through `PdfViewportConfiguration.onPositionChanged`.
 Implement `DisposablePdfFacade` when a custom facade owns document resources.
 
+## PDF view state and tools
+
+Supply `ReaderDocument.initialPdfView` and persist `onPdfViewChanged` snapshots
+locally, scoped to the active profile and book. `PdfViewState.toJson()` preserves
+zoom, fit mode and normalized page center across reopen and viewport changes.
+Keep this device-specific state separate from the synchronized `ReaderLocator`.
+An explicit navigation target should take precedence over a saved view.
+
+`ReaderController.pdfTools` exposes precise zoom, fit page/width, page navigation,
+text search and return history while a supported PDF engine is loaded. The reader
+shell provides these controls, including exact percentage entry, five-percentage-
+point steps, and Ctrl/Cmd+F search. PDF actions occupy the top toolbar; compact
+layouts put secondary actions in its overflow menu. Hosts should return menu
+items from `toolbarActions` when `ReaderToolbarContext.actionsInMenu` is true.
+Custom toolbars can use `ReaderToolbarContext.openSearch`. Search opens a separate
+overlay panel without resizing the document or progress controls. Search requires
+an existing PDF text layer.
+
+Internal PDF links navigate within the reader. Supply `ReaderDocument.onOpenLink`
+to handle external links; the host validates supported schemes and chooses how
+to launch them. A thrown error is surfaced in the reader. No callback means
+external links do not launch anything.
+
 ## Local Papyrus verification
 
 `client/app/pubspec.yaml` pins a separately released reader revision. Temporarily

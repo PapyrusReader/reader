@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'reader_types.dart';
+import 'pdf_reader_tools.dart';
 
 typedef ReaderBytesLoader = Future<Uint8List> Function();
 
@@ -11,6 +12,9 @@ final class ReaderDocument {
     required this.loadBytes,
     this.title,
     this.author,
+    this.initialPdfView,
+    this.onPdfViewChanged,
+    this.onOpenLink,
   });
 
   final String id;
@@ -18,4 +22,7 @@ final class ReaderDocument {
   final String? title;
   final String? author;
   final ReaderBytesLoader loadBytes;
+  final PdfViewState? initialPdfView;
+  final void Function(PdfViewState view)? onPdfViewChanged;
+  final Future<void> Function(Uri uri)? onOpenLink;
 }

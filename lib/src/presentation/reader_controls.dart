@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../domain/reader_document.dart';
+import '../domain/pdf_reader_tools.dart';
+import 'reader_pdf_controls.dart';
 import 'reader_theme_data.dart';
 
 final class ReaderCommandError extends StatelessWidget {
@@ -78,6 +80,9 @@ final class ReaderToolbar extends StatelessWidget {
     required this.theme,
     required this.isWide,
     this.actions = const [],
+    this.pdfTools,
+    this.onSearch,
+    this.compactPdf = false,
   });
 
   final ReaderDocument document;
@@ -89,10 +94,54 @@ final class ReaderToolbar extends StatelessWidget {
   final ReaderThemeData theme;
   final bool isWide;
   final List<Widget> actions;
+  final PdfReaderTools? pdfTools;
+  final VoidCallback? onSearch;
+  final bool compactPdf;
 
   @override
   Widget build(BuildContext context) {
     final height = readerToolbarHeight(context, theme, isWide);
+    if (pdfTools case final tools?) {
+      return SizedBox(
+        height: height,
+        child: ReaderPdfControls(
+          tools: tools,
+          compact: compactPdf,
+          onBack: onBack,
+          onSearch: onSearch!,
+          actions: [
+            ...actions,
+            if (compactPdf) ...[
+              MenuItemButton(
+                leadingIcon: const Icon(Icons.format_list_bulleted_rounded),
+                onPressed: onTableOfContents,
+                child: const Text('Table of contents'),
+              ),
+              MenuItemButton(
+                leadingIcon: const Icon(Icons.text_fields_rounded),
+                onPressed: onSettings,
+                child: const Text('Reading settings'),
+              ),
+            ] else ...[
+              ReaderIconButton(
+                focusNode: tocFocusNode,
+                icon: Icons.format_list_bulleted_rounded,
+                tooltip: 'Table of contents',
+                onPressed: onTableOfContents,
+                theme: theme,
+              ),
+              ReaderIconButton(
+                focusNode: settingsFocusNode,
+                icon: Icons.text_fields_rounded,
+                tooltip: 'Reading settings',
+                onPressed: onSettings,
+                theme: theme,
+              ),
+            ],
+          ],
+        ),
+      );
+    }
 
     return SizedBox(
       height: height,

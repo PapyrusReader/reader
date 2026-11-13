@@ -54,6 +54,8 @@ final class ReaderToolbarContext {
     this.isBusy = false,
     this.toggleControls,
     this.controlsVisible = false,
+    this.actionsInMenu = false,
+    this.openSearch,
   });
 
   final ReaderDocument document;
@@ -66,6 +68,10 @@ final class ReaderToolbarContext {
   /// Hide or restore reader chrome without changing the reading position.
   final VoidCallback? toggleControls;
   final bool controlsVisible;
+
+  /// Compact PDF toolbars render host actions inside the overflow menu.
+  final bool actionsInMenu;
+  final VoidCallback? openSearch;
 }
 
 final class ReaderPanelContext {
@@ -129,6 +135,7 @@ final class ReaderUiBuilders {
     this.error,
     this.empty,
     this.viewport,
+    this.searchEmpty,
   });
 
   final ReaderToolbarBuilder? toolbar;
@@ -145,4 +152,7 @@ final class ReaderUiBuilders {
   final ReaderStateBuilder? error;
   final ReaderStateBuilder? empty;
   final ReaderViewportBuilder? viewport;
+
+  /// Empty results for a non-empty PDF search query.
+  final WidgetBuilder? searchEmpty;
 }
