@@ -74,71 +74,85 @@ Future<void> _ready(WidgetTester tester, PdfReaderTools tools) async {
 }
 
 void main() {
-  testWidgets(
-    'explicit PDF locator overrides a saved center on the same page',
-    (tester) async {
-      await tester.binding.setSurfaceSize(const Size(800, 400));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
-      final bytes = await tester.runAsync(_document);
-      await tester.runAsync(initializePdfiumForTest);
-      final controller = ReaderController(
-        registry: ReaderEngineRegistry.defaults(),
-      );
-      addTearDown(controller.dispose);
+  for (final explicit in [false, true]) {
+    testWidgets(
+      explicit
+          ? 'explicit PDF locator overrides a saved center on the same page'
+          : 'saved PDF view restores its page and center without a locator',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(800, 400));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final bytes = await tester.runAsync(_document);
+        await tester.runAsync(initializePdfiumForTest);
+        final controller = ReaderController(
+          registry: ReaderEngineRegistry.defaults(),
+        );
+        addTearDown(controller.dispose);
 
-      await tester.pumpWidget(
-        MaterialApp(
-          home: PapyrusReader(
-            controller: controller,
-            document: ReaderDocument(
-              id: 'explicit-offset',
-              format: ReaderFormat.pdf,
-              loadBytes: () async => bytes!,
-              initialPdfView: const PdfViewState(
-                pageIndex: 1,
-                zoom: 1.8,
-                centerX: .5,
-                centerY: .2,
-                fitMode: PdfFitMode.custom,
+        await tester.pumpWidget(
+          MaterialApp(
+            home: PapyrusReader(
+              controller: controller,
+              document: ReaderDocument(
+                id: 'explicit-offset',
+                format: ReaderFormat.pdf,
+                loadBytes: () async => bytes!,
+                initialPdfView: const PdfViewState(
+                  pageIndex: 1,
+                  zoom: 1.8,
+                  centerX: .5,
+                  centerY: .2,
+                  fitMode: PdfFitMode.custom,
+                ),
+              ),
+              initialLocator: explicit
+                  ? PdfReaderLocator(
+                      totalProgression: .5,
+                      pageIndex: 1,
+                      pageOffset: .55,
+                    )
+                  : null,
+              initialPreferences: const ReaderPreferences(
+                layoutMode: ReaderLayoutMode.scroll,
               ),
             ),
-            initialLocator: PdfReaderLocator(
-              totalProgression: .5,
-              pageIndex: 1,
-              pageOffset: .55,
-            ),
-            initialPreferences: const ReaderPreferences(
-              layoutMode: ReaderLayoutMode.scroll,
-            ),
           ),
-        ),
-      );
-
-      for (
-        var attempt = 0;
-        attempt < 100 && controller.pdfTools == null;
-        attempt++
-      ) {
-        await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 20)),
         );
-        await tester.pump(const Duration(milliseconds: 20));
-      }
 
-      await _ready(tester, controller.pdfTools!);
-      final viewer = tester
-          .widget<PdfViewer>(find.byType(PdfViewer))
-          .controller!;
-      final page = viewer.layout.pageLayouts[1];
-      expect(controller.pdfTools!.zoom, closeTo(1.8, .001));
-      expect(
-        (viewer.visibleRect.top - page.top) / page.height,
-        closeTo(.55, .001),
-      );
-      await tester.pumpWidget(const SizedBox.shrink());
-    },
-    skip: kIsWeb,
-  );
+        for (
+          var attempt = 0;
+          attempt < 100 && controller.pdfTools == null;
+          attempt++
+        ) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 20)),
+          );
+          await tester.pump(const Duration(milliseconds: 20));
+        }
+
+        await _ready(tester, controller.pdfTools!);
+        final viewer = tester
+            .widget<PdfViewer>(find.byType(PdfViewer))
+            .controller!;
+        final page = viewer.layout.pageLayouts[1];
+        expect(controller.pdfTools!.zoom, closeTo(1.8, .001));
+        expect((controller.snapshot.locator as PdfReaderLocator).pageIndex, 1);
+        if (explicit) {
+          expect(
+            (viewer.visibleRect.top - page.top) / page.height,
+            closeTo(.55, .001),
+          );
+        } else {
+          expect(
+            (viewer.visibleRect.center.dy - page.top) / page.height,
+            closeTo(.2, .001),
+          );
+        }
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+      skip: kIsWeb,
+    );
+  }
 
   test('view preferences reject malformed values and round trip', () {
     const state = PdfViewState(
