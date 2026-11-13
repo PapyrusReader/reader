@@ -87,14 +87,19 @@ export async function checkFormats(browser, origin, reader) {
       const chooser = page.waitForEvent('filechooser');
       await page.getByRole('button', { name: 'Open a book', exact: true }).click();
       await (await chooser).setFiles({ name: `book.${format}`, mimeType: 'application/octet-stream', buffer: bytes });
-      // Conversion and first layout vary by format and runner speed. Wait for
-      // the opening overlay to finish before sending the chrome-toggle tap.
+      // The reader route and its first viewport become ready in separate
+      // frames. A toggle sent while opening is intentionally ignored. Retry
+      // only while controls remain absent, then test real page navigation.
       await page.getByRole('button', { name: 'Open a book', exact: true }).waitFor({ state: 'hidden', timeout: 30000 });
-      await page.getByRole('progressbar').waitFor({ state: 'hidden', timeout: 60000 });
-      await page.waitForTimeout(500);
-      await page.mouse.click(550, 400);
       const next = page.getByRole('button', { name: 'Next', exact: true });
-      await next.waitFor({ timeout: 15000 });
+      const deadline = Date.now() + 60000;
+      while (!await next.isVisible() && Date.now() < deadline) {
+        await page.getByRole('progressbar').waitFor({ state: 'hidden', timeout: 60000 });
+        await page.mouse.click(550, 400);
+        try { await next.waitFor({ timeout: 1500 }); }
+        catch (error) { if (error.name !== 'TimeoutError') throw error; }
+      }
+      assert.ok(await next.isVisible(), `${format} reader did not become ready: ${await page.locator('body').innerText()}`);
       assert.ok(await next.isEnabled(), `${format} must have a readable next page`);
       await next.click({ force: true });
       await page.waitForTimeout(500);
