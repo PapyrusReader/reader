@@ -136,7 +136,13 @@ try {
   };
 
   const openSettings = async () => {
-    await click(page.getByRole('button', { name: 'Reading settings', exact: true }));
+    const overflow = page.getByRole('button', { name: 'More reader actions', exact: true });
+    if (await overflow.isVisible()) {
+      await click(overflow);
+      await click(page.getByRole('button', { name: 'Reading settings', exact: true }));
+    } else {
+      await click(page.getByRole('button', { name: 'Reading settings', exact: true }));
+    }
     await page.getByRole('button', { name: 'Close panel', exact: true }).waitFor();
     await settle();
   };
@@ -285,10 +291,10 @@ try {
   await showInitialControls(page.getByText('Page 1 of 3.', { exact: true }));
   await settle();
   await screenshot('pdf-initial');
-  await page.getByLabel(/Page 1 of 3/).waitFor();
+  await page.getByText('Page 1 of 3.', { exact: true }).waitFor();
   await settle();
   await click(page.getByRole('button', { name: 'Next', exact: true }));
-  await page.getByLabel(/Page 2 of 3/).waitFor();
+  await page.getByText('Page 2 of 3.', { exact: true }).waitFor();
   await settle();
   await screenshot('pdf');
   await hideControls();
@@ -303,11 +309,11 @@ try {
   await tapPage();
   await page.getByRole('button', { name: 'Back', exact: true }).waitFor();
   await settle();
-  await page.getByLabel(/Page 2 of 3/).waitFor();
+  await page.getByText('Page 2 of 3.', { exact: true }).waitFor();
   await backToLibrary();
   await click(page.getByRole('button', { name: 'Read PDF', exact: true }));
   await showInitialControls(page.getByText('Page 2 of 3.', { exact: true }));
-  await page.getByLabel(/Page 2 of 3/).waitFor();
+  await page.getByText('Page 2 of 3.', { exact: true }).waitFor();
   await settle();
   await openSettings();
   assert.equal(await page.getByLabel('Typeface', { exact: false }).count(), 0,
@@ -344,7 +350,7 @@ try {
   // Discrete PDF wheel turns intentionally debounce input for 250 ms.
   await page.waitForTimeout(260);
   await page.mouse.wheel(0, -180);
-  await page.getByLabel(/Page 2 of 3/).waitFor();
+  await page.getByText('Page 2 of 3.', { exact: true }).waitFor();
   await settle();
   await openSettings();
   await select('Paginated', 'Continuous scroll');
@@ -361,7 +367,7 @@ try {
   const continuousAfter = await pdfText().boundingBox();
   assert.ok(continuousBefore && continuousAfter && continuousAfter.y < continuousBefore.y - 5,
     'Continuous PDF mode must move within the page rather than snapping to the next page');
-  await page.getByLabel(/Page 2 of 3/).waitFor();
+  await page.getByText('Page 2 of 3.', { exact: true }).waitFor();
   await screenshot('pdf-continuous');
   await openSettings();
   const scrollSingle = await pdfText().boundingBox();
