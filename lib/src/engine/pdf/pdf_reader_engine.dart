@@ -148,7 +148,12 @@ final class PdfReaderEngine extends ReaderEngine {
         );
       }
 
-      final target = restored ?? _locatorFor(0, pageCount: facade.pageCount);
+      final savedPage = (document.initialPdfView?.pageIndex ?? 0).clamp(
+        0,
+        facade.pageCount - 1,
+      );
+      final target =
+          restored ?? _locatorFor(savedPage, pageCount: facade.pageCount);
       final toc = facade.outline
           .map((entry) => _tocEntry(entry, facade.pageCount))
           .toList();
