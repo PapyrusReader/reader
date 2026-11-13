@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, extname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { checkFormats } from './formats.mjs';
 
 const reader = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const dist = resolve(reader, 'example/build/web');
@@ -38,7 +39,7 @@ try {
   // Exercise the actual packaged Worker protocol independently of Flutter's
   // widget-test fake clock and mock asset channel.
   const protocol = await page.evaluate(async () => {
-    const script = await (await fetch('assets/packages/papyrus_reader/assets/epub_worker.js')).text();
+    const script = await (await fetch('assets/packages/papyrus_reader/assets/epub_worker')).text();
     const url = URL.createObjectURL(new Blob([script], { type: 'text/javascript' }));
     const worker = new Worker(url);
     URL.revokeObjectURL(url);
@@ -70,6 +71,26 @@ try {
   assert.equal(protocol.count, 2);
   assert.ok(protocol.blocks > 20);
   assert.equal(protocol.error, 'invalidDocument');
+
+  // Flutter routes pointer events through its canvas even when a Slider's empty
+  // semantics overlay is above the control in the DOM. Exercise actual pointer
+  // input; Playwright's DOM-only receives-events check rejects these controls.
+  const click = async (control) => {
+    await control.waitFor({ state: 'visible' });
+    await settle();
+    assert.ok(await control.isEnabled(), 'Control must be enabled');
+    let bounds = await control.boundingBox();
+    assert.ok(bounds, 'Control must have visible bounds');
+    const viewport = page.viewportSize();
+    if (bounds.y < 0 || bounds.y + bounds.height > viewport.height ||
+        bounds.x < 0 || bounds.x + bounds.width > viewport.width) {
+      await control.scrollIntoViewIfNeeded();
+      await settle();
+      bounds = await control.boundingBox();
+      assert.ok(bounds, 'Scrolled control must have visible bounds');
+    }
+    await page.mouse.click(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+  };
 
   const settle = () => page.evaluate(() => new Promise((resolve, reject) => {
     const deadline = performance.now() + 5000;
@@ -115,42 +136,48 @@ try {
   };
 
   const openSettings = async () => {
-    await page.getByRole('button', { name: 'Reading settings', exact: true }).click();
+    const overflow = page.getByRole('button', { name: 'More reader actions', exact: true });
+    if (await overflow.isVisible()) {
+      await click(overflow);
+      await click(page.getByRole('button', { name: 'Reading settings', exact: true }));
+    } else {
+      await click(page.getByRole('button', { name: 'Reading settings', exact: true }));
+    }
     await page.getByRole('button', { name: 'Close panel', exact: true }).waitFor();
     await settle();
   };
   const closeSettings = async () => {
     const close = page.getByRole('button', { name: 'Close panel', exact: true });
-    await close.click();
+    await click(close);
     await close.waitFor({ state: 'hidden' });
     await settle();
   };
   const backToLibrary = async () => {
-    await page.getByRole('button', { name: 'Back', exact: true }).click();
+    await click(page.getByRole('button', { name: 'Back', exact: true }));
     await page.getByRole('button', { name: 'Open a book', exact: true }).waitFor();
     await settle();
   };
   const appearance = async name => {
     const chip = page.getByLabel(name, { exact: true });
-    await chip.click();
+    await click(chip);
     await chip.waitForFunction(element => ['aria-checked', 'aria-pressed', 'aria-selected']
       .some(attribute => element.getAttribute(attribute) === 'true'));
     await settle();
   };
   const select = async (current, target) => {
-    await page.getByRole('button', { name: new RegExp(current) }).click();
+    await click(page.getByRole('button', { name: new RegExp(current) }));
     const option = page.getByRole('menuitem', { name: target, exact: true });
     await option.waitFor();
-    await option.click();
+    await click(option);
     await option.waitFor({ state: 'hidden' });
     await page.getByRole('button', { name: new RegExp(target) }).waitFor();
     await settle();
   };
 
-  await page.getByRole('button', { name: 'Explore layouts', exact: true }).click();
+  await click(page.getByRole('button', { name: 'Explore layouts', exact: true }));
   await showInitialControls(page.getByText('At the Gate', { exact: true }).first());
   await page.waitForFunction(() => document.body.innerText.includes('Passage 1.'));
-  await page.getByRole('button', { name: 'Next', exact: true }).click();
+  await click(page.getByRole('button', { name: 'Next', exact: true }));
   await page.waitForFunction(() => !document.body.innerText.includes('Passage 1. Reading'));
   assert.ok(!await page.locator('body').innerText().then(text => text.includes('After the Rain')),
     'Next must turn a page before crossing chapters');
@@ -216,12 +243,12 @@ try {
     const chooser = page.waitForEvent('filechooser');
     await page.getByRole('button', { name: 'Open a book', exact: true }).waitFor();
     await settle();
-    await page.getByRole('button', { name: 'Open a book', exact: true }).click();
+    await click(page.getByRole('button', { name: 'Open a book', exact: true }));
     await (await chooser).setFiles(path);
   };
   await openFile(resolve(reader, 'example/assets/reading_lab.epub'));
   await showInitialControls(page.getByText('At the Gate', { exact: true }).first());
-  const progressSlider = page.getByRole('slider').last();
+  const progressSlider = page.getByRole('group', { name: /^Reading progress/ });
   const progressBounds = await progressSlider.boundingBox();
   assert.ok(progressBounds, 'Reading progress must remain interactive');
   const progressY = progressBounds.y + progressBounds.height / 2;
@@ -242,7 +269,7 @@ try {
 
   // Crossing chapters must retain keyboard focus in focus mode without pointer refocus.
   await page.setViewportSize({ width: 1280, height: 850 });
-  await page.getByRole('button', { name: 'Read EPUB', exact: true }).click();
+  await click(page.getByRole('button', { name: 'Read EPUB', exact: true }));
   await page.getByText('At the Gate', { exact: true }).first().waitFor();
   await settle();
   await assertControlsHidden();
@@ -260,14 +287,14 @@ try {
   await backToLibrary();
   await page.setViewportSize({ width: 700, height: 360 });
 
-  await page.getByRole('button', { name: 'Read PDF', exact: true }).click();
+  await click(page.getByRole('button', { name: 'Read PDF', exact: true }));
   await showInitialControls(page.getByText('Page 1 of 3.', { exact: true }));
   await settle();
   await screenshot('pdf-initial');
-  await page.getByLabel(/Page 1 of 3/).waitFor();
+  await page.getByText('Page 1 of 3.', { exact: true }).waitFor();
   await settle();
-  await page.getByRole('button', { name: 'Next', exact: true }).click();
-  await page.getByLabel(/Page 2 of 3/).waitFor();
+  await click(page.getByRole('button', { name: 'Next', exact: true }));
+  await page.getByText('Page 2 of 3.', { exact: true }).waitFor();
   await settle();
   await screenshot('pdf');
   await hideControls();
@@ -282,11 +309,11 @@ try {
   await tapPage();
   await page.getByRole('button', { name: 'Back', exact: true }).waitFor();
   await settle();
-  await page.getByLabel(/Page 2 of 3/).waitFor();
+  await page.getByText('Page 2 of 3.', { exact: true }).waitFor();
   await backToLibrary();
-  await page.getByRole('button', { name: 'Read PDF', exact: true }).click();
+  await click(page.getByRole('button', { name: 'Read PDF', exact: true }));
   await showInitialControls(page.getByText('Page 2 of 3.', { exact: true }));
-  await page.getByLabel(/Page 2 of 3/).waitFor();
+  await page.getByText('Page 2 of 3.', { exact: true }).waitFor();
   await settle();
   await openSettings();
   assert.equal(await page.getByLabel('Typeface', { exact: false }).count(), 0,
@@ -318,12 +345,12 @@ try {
   await closeSettings();
   await page.mouse.move(450, 350);
   await page.mouse.wheel(0, 180);
-  await page.getByLabel(/Page 3 of 3/).waitFor();
+  await page.getByText('Page 3 of 3.', { exact: true }).waitFor();
   await settle();
   // Discrete PDF wheel turns intentionally debounce input for 250 ms.
   await page.waitForTimeout(260);
   await page.mouse.wheel(0, -180);
-  await page.getByLabel(/Page 2 of 3/).waitFor();
+  await page.getByText('Page 2 of 3.', { exact: true }).waitFor();
   await settle();
   await openSettings();
   await select('Paginated', 'Continuous scroll');
@@ -333,14 +360,14 @@ try {
   const pdfText = () => page.getByText('Page 2 of 3.', { exact: true });
   const continuousBefore = await pdfText().boundingBox();
   await page.mouse.move(450, 350);
-  await page.mouse.wheel(0, 100);
+  await page.mouse.wheel(0, -100);
   await pdfText().waitForFunction((element, previousY) =>
-    element.getBoundingClientRect().y < previousY - 5, continuousBefore.y);
+    element.getBoundingClientRect().y > previousY + 5, continuousBefore.y);
   await settle();
   const continuousAfter = await pdfText().boundingBox();
-  assert.ok(continuousBefore && continuousAfter && continuousAfter.y < continuousBefore.y - 5,
+  assert.ok(continuousBefore && continuousAfter && continuousAfter.y > continuousBefore.y + 5,
     'Continuous PDF mode must move within the page rather than snapping to the next page');
-  await page.getByLabel(/Page 2 of 3/).waitFor();
+  await page.getByText('Page 2 of 3.', { exact: true }).waitFor();
   await screenshot('pdf-continuous');
   await openSettings();
   const scrollSingle = await pdfText().boundingBox();
@@ -362,37 +389,37 @@ try {
   // Closed dropdown text alone cannot detect a stale host canvas color.
   await closeSettings();
   await backToLibrary();
-  await page.getByRole('button', { name: 'Use dark theme', exact: true }).click();
+  await click(page.getByRole('button', { name: 'Use dark theme', exact: true }));
   // Flutter may repeat the accessible name while the hovered tooltip is visible.
   await page.getByRole('button', { name: /^Use light theme\b/ }).waitFor();
   await settle();
-  await page.getByRole('button', { name: 'Read EPUB', exact: true }).click();
+  await click(page.getByRole('button', { name: 'Read EPUB', exact: true }));
   await showInitialControls(page.getByText('At the Gate', { exact: true }).first());
   await settle();
   await openSettings();
   await appearance('Light');
-  await page.getByRole('button', { name: /Reading mode/ }).click();
+  await click(page.getByRole('button', { name: /Reading mode/ }));
   await page.getByRole('menuitem', { name: 'Continuous scroll', exact: true }).waitFor();
   await settle();
   await screenshot('dark-app-light-reader-menu');
-  await page.getByRole('menuitem', { name: 'Continuous scroll', exact: true }).click();
+  await click(page.getByRole('menuitem', { name: 'Continuous scroll', exact: true }));
   await page.getByRole('menuitem', { name: 'Continuous scroll', exact: true }).waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: /Continuous scroll/ }).waitFor();
   await settle();
-  await page.getByRole('button', { name: /Typeface/ }).click();
+  await click(page.getByRole('button', { name: /Typeface/ }));
   await page.getByRole('menuitem', { name: 'Sans serif', exact: true }).waitFor();
   await settle();
   await screenshot('dark-app-light-reader-typeface');
-  await page.getByRole('menuitem', { name: 'Sans serif', exact: true }).click();
+  await click(page.getByRole('menuitem', { name: 'Sans serif', exact: true }));
   await page.getByRole('menuitem', { name: 'Sans serif', exact: true }).waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: /Sans serif/ }).waitFor();
   await settle();
   await appearance('Night');
-  await page.getByRole('button', { name: /Reading mode/ }).click();
+  await click(page.getByRole('button', { name: /Reading mode/ }));
   await page.getByRole('menuitem', { name: 'Paginated', exact: true }).waitFor();
   await settle();
   await screenshot('dark-app-night-reader-menu');
-  await page.getByRole('menuitem', { name: 'Paginated', exact: true }).click();
+  await click(page.getByRole('menuitem', { name: 'Paginated', exact: true }));
   await page.getByRole('menuitem', { name: 'Paginated', exact: true }).waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: /Paginated/ }).waitFor();
   await settle();
@@ -400,6 +427,7 @@ try {
   await backToLibrary();
   await page.getByRole('button', { name: 'Use light theme', exact: true }).waitFor();
   assert.deepEqual(errors, []);
+  await checkFormats(browser, origin, reader);
   console.log('Browser checks passed: worker protocol, focus mode and chapter keyboard focus, responsive settings, local files, cleanup, PDF pagination/scroll, column/appearance refitting and opened menus under opposite app themes.');
 } finally {
   await browser.close();

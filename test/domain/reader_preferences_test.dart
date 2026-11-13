@@ -13,6 +13,7 @@ void main() {
       expect(preferences.brightness, Brightness.light);
       expect(preferences.layoutMode, ReaderLayoutMode.paginated);
       expect(preferences.columnMode, ReaderColumnMode.single);
+      expect(preferences.highlightLinks, isTrue);
     });
 
     test('copyWith changes selected values and preserves the rest', () {
@@ -32,6 +33,14 @@ void main() {
       expect(changed.layoutMode, ReaderLayoutMode.scroll);
       expect(changed, isNot(original));
       expect(changed.copyWith(), changed);
+    });
+
+    test('link highlighting survives copies and participates in equality', () {
+      const preferences = ReaderPreferences();
+      final changed = preferences.copyWith(highlightLinks: false);
+      expect(changed, isNot(preferences));
+      expect(changed.copyWith(fontSize: 24).highlightLinks, isFalse);
+      expect(changed.copyWith(highlightLinks: true), preferences);
     });
 
     test('supports setting and clearing an optional font family', () {

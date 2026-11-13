@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/widgets.dart';
 
 import '../../domain/reader_capabilities.dart';
@@ -9,20 +11,34 @@ import '../../domain/reader_preferences.dart';
 import '../../domain/reader_snapshot.dart';
 import '../../domain/reader_toc_entry.dart';
 import '../../domain/reader_types.dart';
+import '../../domain/pdf_reader_tools.dart';
 import '../reader_engine.dart';
 import 'pdf_facade.dart';
+import '../epub/worker/epub_worker.dart';
 
 final class PdfReaderEngine extends ReaderEngine {
-  PdfReaderEngine({PdfFacadeFactory? facadeFactory})
-    : _facadeFactory = facadeFactory;
+  PdfReaderEngine({
+    PdfFacadeFactory? facadeFactory,
+    Future<EpubWorker> Function() workerFactory = createEpubWorker,
+  }) : _facadeFactory = facadeFactory,
+       _workerFactory = workerFactory;
 
   final PdfFacadeFactory? _facadeFactory;
+  final Future<EpubWorker> Function() _workerFactory;
+  EpubWorker? _preparingWorker;
+  int _generation = 0;
 
   @override
-  Set<ReaderFormat> get supportedFormats => const {ReaderFormat.pdf};
+  Set<ReaderFormat> get supportedFormats => const {
+    ReaderFormat.pdf,
+    ReaderFormat.cbz,
+    ReaderFormat.cbr,
+  };
 
   @override
-  ReaderCapabilities get capabilities => const ReaderCapabilities(
+  ReaderCapabilities get capabilities => ReaderCapabilities(
+    supportsLinkHighlighting:
+        _document?.format == ReaderFormat.pdf && _facade is PdfReaderTools,
     supportsPagination: true,
     supportsScrolling: true,
     supportsTextCustomization: false,
@@ -33,6 +49,10 @@ final class PdfReaderEngine extends ReaderEngine {
   ReaderSnapshot snapshot = const ReaderIdleSnapshot();
 
   PdfFacade? _facade;
+
+  @override
+  PdfReaderTools? get pdfTools =>
+      _facade is PdfReaderTools ? _facade as PdfReaderTools : null;
   ReaderDocument? _document;
   ReaderPreferences _preferences = const ReaderPreferences();
   PdfReaderLocator? _locator;
@@ -46,10 +66,10 @@ final class PdfReaderEngine extends ReaderEngine {
     ReaderLocator? initialLocator,
     required ReaderPreferences preferences,
   }) async {
-    if (document.format != ReaderFormat.pdf) {
+    if (!supportedFormats.contains(document.format)) {
       throw const ReaderException(
         ReaderErrorCode.invalidDocument,
-        'The PDF engine can only load PDF documents.',
+        'This engine requires a PDF or comic document.',
       );
     }
     if (initialLocator != null && initialLocator is! PdfReaderLocator) {
@@ -61,10 +81,37 @@ final class PdfReaderEngine extends ReaderEngine {
 
     _exposedPages = const [];
     _viewportReady = null;
+    final generation = ++_generation;
+    _preparingWorker?.dispose();
+    _preparingWorker = null;
     PdfFacade? candidate;
+    EpubWorker? worker;
     try {
-      final bytes = await document.loadBytes();
-      if (_disposed) {
+      var bytes = await document.loadBytes();
+      if (_disposed || generation != _generation) {
+        throw const ReaderException(
+          ReaderErrorCode.engineUnavailable,
+          'The document was closed.',
+        );
+      }
+      if (document.format != ReaderFormat.pdf) {
+        worker = await _workerFactory();
+        if (_disposed || generation != _generation) {
+          throw const ReaderException(
+            ReaderErrorCode.engineUnavailable,
+            'The document was closed.',
+          );
+        }
+        _preparingWorker = worker;
+        final prepared = await worker.request(
+          'prepare_${document.format.name}',
+          bytes,
+        );
+        bytes = prepared['bytes'] as Uint8List;
+        worker.dispose();
+        if (identical(_preparingWorker, worker)) _preparingWorker = null;
+      }
+      if (_disposed || generation != _generation) {
         throw const ReaderException(
           ReaderErrorCode.engineUnavailable,
           'The document was closed.',
@@ -72,10 +119,18 @@ final class PdfReaderEngine extends ReaderEngine {
       }
       final factory =
           _facadeFactory ??
-          (bytes) => createPdfrxFacade(bytes, sourceName: document.id);
+          (bytes) => createPdfrxFacade(
+            bytes,
+            sourceName: document.id,
+            preserveColors: document.format != ReaderFormat.pdf,
+            initialView: document.initialPdfView,
+            preferInitialLocator: initialLocator != null,
+            onViewChanged: document.onPdfViewChanged,
+            onOpenLink: document.onOpenLink,
+          );
       final facade = await factory(bytes);
       candidate = facade;
-      if (_disposed) {
+      if (_disposed || generation != _generation) {
         throw const ReaderException(
           ReaderErrorCode.engineUnavailable,
           'The document was closed.',
@@ -93,12 +148,17 @@ final class PdfReaderEngine extends ReaderEngine {
         );
       }
 
-      final target = restored ?? _locatorFor(0, pageCount: facade.pageCount);
+      final savedPage = (document.initialPdfView?.pageIndex ?? 0).clamp(
+        0,
+        facade.pageCount - 1,
+      );
+      final target =
+          restored ?? _locatorFor(savedPage, pageCount: facade.pageCount);
       final toc = facade.outline
           .map((entry) => _tocEntry(entry, facade.pageCount))
           .toList();
       await facade.showPage(target.pageIndex, target.pageOffset);
-      if (_disposed) {
+      if (_disposed || generation != _generation) {
         throw const ReaderException(
           ReaderErrorCode.engineUnavailable,
           'The document was closed.',
@@ -127,7 +187,7 @@ final class PdfReaderEngine extends ReaderEngine {
             : ReaderErrorCode.invalidDocument,
         error.error == PdfFacadeError.encrypted
             ? 'The PDF document is encrypted.'
-            : 'The PDF document is invalid or malformed.',
+            : 'The page document is invalid or malformed.',
         cause: error.cause,
       );
     } catch (error) {
@@ -136,9 +196,12 @@ final class PdfReaderEngine extends ReaderEngine {
       }
       throw ReaderException(
         ReaderErrorCode.invalidDocument,
-        'The PDF document is invalid or malformed.',
+        'The page document is invalid or malformed.',
         cause: error,
       );
+    } finally {
+      worker?.dispose();
+      if (identical(_preparingWorker, worker)) _preparingWorker = null;
     }
   }
 
@@ -367,6 +430,7 @@ final class PdfReaderEngine extends ReaderEngine {
             backgroundColor: _preferences.backgroundColor,
             brightness: _preferences.brightness,
             layoutMode: _preferences.layoutMode,
+            highlightLinks: _preferences.highlightLinks,
             onPageChanged: _visiblePageChanged,
             onPositionChanged: _visiblePositionChanged,
             onVisiblePagesChanged: _visiblePagesChanged,
@@ -387,6 +451,9 @@ final class PdfReaderEngine extends ReaderEngine {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    _generation++;
+    _preparingWorker?.dispose();
+    _preparingWorker = null;
     final facade = _facade;
     _facade = null;
     if (facade != null) _release(facade);

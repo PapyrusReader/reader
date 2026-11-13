@@ -203,6 +203,33 @@ final class ReaderSettingsPanel extends StatelessWidget {
                 : null,
           ),
         ],
+        if (capabilities.supportsLinkHighlighting) ...[
+          const SizedBox(height: 12),
+          Theme(
+            data: Theme.of(context).copyWith(
+              splashFactory: NoSplash.splashFactory,
+              highlightColor: Colors.transparent,
+              hoverColor: Colors.transparent,
+            ),
+            child: SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Highlight links'),
+              value: preferences.highlightLinks,
+              overlayColor: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.pressed) ||
+                    !states.contains(WidgetState.focused)) {
+                  return Colors.transparent;
+                }
+
+                return null;
+              }),
+              onChanged: enabled
+                  ? (value) =>
+                        _update(preferences.copyWith(highlightLinks: value))
+                  : null,
+            ),
+          ),
+        ],
         const SizedBox(height: 20),
         Text('Page appearance', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
@@ -243,7 +270,13 @@ final class ReaderSettingsPanel extends StatelessWidget {
         ),
       ],
     );
-    if (!showHeader) return content;
+    final accessibleContent = Semantics(
+      container: true,
+      explicitChildNodes: true,
+      child: content,
+    );
+
+    if (!showHeader) return accessibleContent;
     return Column(
       children: [
         ReaderPanelHeader(
@@ -251,7 +284,7 @@ final class ReaderSettingsPanel extends StatelessWidget {
           close: close,
           theme: theme,
         ),
-        Expanded(child: content),
+        Expanded(child: accessibleContent),
       ],
     );
   }

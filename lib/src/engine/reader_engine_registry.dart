@@ -27,11 +27,16 @@ final class ReaderEngineRegistry {
   factory ReaderEngineRegistry.defaults() {
     return ReaderEngineRegistry([
       ReaderEngineRegistration(
-        formats: const {ReaderFormat.epub},
+        formats: const {
+          ReaderFormat.epub,
+          ReaderFormat.mobi,
+          ReaderFormat.azw3,
+          ReaderFormat.txt,
+        },
         factory: EpubReaderEngine.new,
       ),
       ReaderEngineRegistration(
-        formats: const {ReaderFormat.pdf},
+        formats: const {ReaderFormat.pdf, ReaderFormat.cbr, ReaderFormat.cbz},
         factory: PdfReaderEngine.new,
       ),
     ]);

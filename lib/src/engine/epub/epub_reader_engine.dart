@@ -85,7 +85,12 @@ final class EpubReaderEngine extends ReaderEngine {
   ReaderPreferences get preferences => _preferences;
 
   @override
-  Set<ReaderFormat> get supportedFormats => const {ReaderFormat.epub};
+  Set<ReaderFormat> get supportedFormats => const {
+    ReaderFormat.epub,
+    ReaderFormat.mobi,
+    ReaderFormat.azw3,
+    ReaderFormat.txt,
+  };
   @override
   ReaderCapabilities get capabilities => const ReaderCapabilities(
     supportsPagination: true,
@@ -103,11 +108,11 @@ final class EpubReaderEngine extends ReaderEngine {
     ReaderLocator? initialLocator,
     required ReaderPreferences preferences,
   }) async {
-    if (document.format != ReaderFormat.epub ||
+    if (!supportedFormats.contains(document.format) ||
         (initialLocator != null && initialLocator is! EpubReaderLocator)) {
       throw const ReaderException(
         ReaderErrorCode.invalidDocument,
-        'The EPUB document or initial locator has the wrong format.',
+        'The text document or initial locator has the wrong format.',
       );
     }
     cancelPendingSeek();
@@ -119,7 +124,12 @@ final class EpubReaderEngine extends ReaderEngine {
       candidate = await _workerFactory();
       _requireCurrent(generation);
       _openingWorker = candidate;
-      final metadata = await candidate.open(bytes);
+      final metadata = await candidate.request(
+        document.format == ReaderFormat.epub
+            ? 'open'
+            : 'open_${document.format.name}',
+        bytes,
+      );
       _requireCurrent(generation);
       final count = metadata['count'] as int;
       final restored = initialLocator as EpubReaderLocator?;
@@ -162,7 +172,7 @@ final class EpubReaderEngine extends ReaderEngine {
       if (!identical(candidate, _worker)) candidate?.dispose();
       throw ReaderException(
         ReaderErrorCode.invalidDocument,
-        'The EPUB document is invalid or malformed.',
+        'The text document is invalid or malformed.',
         cause: error,
       );
     } finally {

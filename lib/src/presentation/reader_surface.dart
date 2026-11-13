@@ -42,6 +42,7 @@ final class _ReaderSurfaceState extends State<ReaderSurface> {
   bool _cancelled = false;
   bool _selection = false;
   bool _blocked = false;
+  int _tapRevision = 0;
   Timer? _tap;
   Timer? _hold;
 
@@ -68,14 +69,18 @@ final class _ReaderSurfaceState extends State<ReaderSurface> {
       _selection = selected;
     },
     suppressTap: () {
+      _tapRevision++;
       _blocked = true;
       _cancelled = true;
       _tap?.cancel();
+      // Suppression belongs to this pointer dispatch, including delayed link taps.
+      scheduleMicrotask(() => _blocked = false);
     },
     child: LayoutBuilder(
       builder: (context, constraints) => Listener(
         behavior: HitTestBehavior.translucent,
         onPointerDown: (event) {
+          _tapRevision++;
           final doubleTap = _tap?.isActive ?? false;
           _tap?.cancel();
           _pointers.add(event.pointer);
@@ -110,10 +115,18 @@ final class _ReaderSurfaceState extends State<ReaderSurface> {
               event.timeStamp - _startedAt >= kLongPressTimeout) {
             return;
           }
+          final revision = _tapRevision;
           _tap = Timer(kDoubleTapTimeout, () {
-            if (mounted && widget.enabled && !_cancelled && !_selection) {
-              widget.onToggle();
-            }
+            // Let viewport recognizers consume links before toggling the chrome.
+            _tap = Timer(Duration.zero, () {
+              if (mounted &&
+                  revision == _tapRevision &&
+                  widget.enabled &&
+                  !_cancelled &&
+                  !_selection) {
+                widget.onToggle();
+              }
+            });
           });
         },
         child: widget.child,

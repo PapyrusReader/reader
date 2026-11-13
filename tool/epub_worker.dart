@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:js_interop';
+import 'dart:typed_data';
 
 import 'package:web/web.dart' as web;
 
@@ -15,9 +16,21 @@ void main() {
     final request = (event.data.dartify() as Map).cast<String, Object?>();
     if (request['bytes'] case final bytes?) request['argument'] = bytes;
     queue = queue.then((_) async {
-      scope.postMessage(
-        jsonEncode(await processEpubMessage(processor, request)).toJS,
-      );
+      final response = await processEpubMessage(processor, request);
+      final result = response['result'];
+
+      if (result is Map && result['bytes'] is Uint8List) {
+        final bytes = result['bytes'] as Uint8List;
+        scope.postMessage(
+          {
+            'id': response['id'],
+            'result': {'bytes': bytes.toJS},
+          }.jsify(),
+          [bytes.buffer.toJS].toJS,
+        );
+      } else {
+        scope.postMessage(jsonEncode(response).toJS);
+      }
     });
   }).toJS;
 }

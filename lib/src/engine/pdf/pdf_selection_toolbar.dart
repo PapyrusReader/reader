@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -32,6 +34,8 @@ final class _PdfSelectionToolbarState extends State<PdfSelectionToolbar> {
   final _menu = ContextMenuController();
   int _revision = 0;
   int? _pointer;
+  Offset? _pointerStart;
+  bool _dragged = false;
 
   @override
   void initState() {
@@ -80,7 +84,13 @@ final class _PdfSelectionToolbarState extends State<PdfSelectionToolbar> {
 
     final ranges = await selection.getSelectedTextRanges();
 
-    if (!mounted || revision != _revision || !controller.isReady) return;
+    if (!mounted ||
+        revision != _revision ||
+        !controller.isReady ||
+        !selection.hasSelectedText ||
+        !selection.isCopyAllowed) {
+      return;
+    }
 
     final viewport = context.findRenderObject() as RenderBox?;
 
@@ -148,7 +158,12 @@ final class _PdfSelectionToolbarState extends State<PdfSelectionToolbar> {
     _menu.show(
       context: context,
       contextMenuBuilder: (_) => TapRegion(
-        onTapOutside: (_) => _dismiss(),
+        onTapOutside: (event) {
+          _dismiss();
+          if (event.buttons == kPrimaryButton && controller.isReady) {
+            unawaited(selection.clearTextSelection());
+          }
+        },
         child: Focus(
           onKeyEvent: _onKeyEvent,
           child: ReaderTextToolbar(bounds: menuBounds, items: items),
@@ -173,15 +188,30 @@ final class _PdfSelectionToolbarState extends State<PdfSelectionToolbar> {
               event.buttons == kPrimaryButton
           ? event.pointer
           : null;
+      _pointerStart = _pointer == null ? null : event.position;
+      _dragged = false;
+    },
+    onPointerMove: (event) {
+      if (event.pointer == _pointer &&
+          _pointerStart != null &&
+          (event.position - _pointerStart!).distance > kPrecisePointerHitSlop) {
+        _dragged = true;
+      }
     },
     onPointerUp: (event) {
       if (event.pointer == _pointer) {
         _pointer = null;
-        _scheduleMenu();
+        _pointerStart = null;
+        // A click can still expose the old selection until tap recognition ends.
+        if (_dragged) {
+          _scheduleMenu();
+        }
       }
     },
     onPointerCancel: (_) {
       _pointer = null;
+      _pointerStart = null;
+      _dragged = false;
       _dismiss();
     },
     onPointerSignal: (_) => _dismiss(),
