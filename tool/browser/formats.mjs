@@ -106,10 +106,12 @@ export async function checkFormats(browser, origin, reader) {
         await page.mouse.click(20, 400);
         await next.waitFor({ state: 'hidden' });
         await page.waitForTimeout(300);
-        // Start in the outer window margins, beyond the centered text column.
+        // Start beyond the centered text column. Keep the stroke shorter than
+        // its 800px page but longer than half the 1100px PDF viewport, so
+        // release velocity cannot turn a one-page assertion into a two-page fling.
         await page.mouse.move(direction > 0 ? 1040 : 60, 400);
         await page.mouse.down();
-        await page.mouse.move(direction > 0 ? 60 : 1040, 400, { steps: 18 });
+        await page.mouse.move(direction > 0 ? 340 : 760, 400, { steps: 18 });
         await page.mouse.up();
         await page.waitForTimeout(700);
         await page.mouse.click(20, 400);
