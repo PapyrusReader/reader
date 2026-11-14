@@ -11,6 +11,7 @@ import '../../domain/reader_preferences.dart';
 import '../../presentation/reader_interaction_scope.dart';
 import '../../presentation/reader_loading.dart';
 import '../../presentation/reader_swipe_tracker.dart';
+import '../../presentation/reader_mouse_page_drag.dart';
 import '../../presentation/reader_highlight_interaction.dart';
 import '../../presentation/reader_text_toolbar.dart';
 import 'epub_reader_engine.dart';
@@ -537,6 +538,8 @@ final class _EpubViewportState extends State<EpubViewport> {
       return;
     }
     final page = _pagesController.page! - _leadingPages;
+    // Catching an unfinished turn also ends its current scroll activity.
+    if ((page - page.round()).abs() > .000001) return;
     final count = (_pages.length / _columns).ceil();
     if (page >= 0 && page < count) return;
     unawaited(
@@ -1154,45 +1157,64 @@ final class _EpubViewportState extends State<EpubViewport> {
                         }
                         return false;
                       },
-                      child: PageView.builder(
-                        key: ValueKey(_pagesController),
+                      child: ReaderMousePageDrag(
                         controller: _pagesController,
-                        physics: _animateTurns
-                            ? const ClampingScrollPhysics()
-                            : const NeverScrollableScrollPhysics(),
-                        onPageChanged: (index) => _publishPage(index - leading),
-                        itemCount: _pageViewCount,
-                        itemBuilder: (context, index) {
-                          final local = index - leading;
-                          if (local < 0 || local >= count) {
-                            final direction = local < 0 ? -1 : 1;
-                            final spine =
-                                widget.engine.locator.spineIndex + direction;
-                            final neighbor =
-                                _layoutCache[(spine, _geometryKey)];
-                            if (neighbor == null ||
-                                neighbor.pages.isEmpty ||
-                                (direction < 0 && !neighbor.complete)) {
-                              return const ReaderLoading();
+                        animate: _animateTurns,
+                        onTurn: _requestTurn,
+                        canStart: (position) =>
+                            _selectedText.isEmpty &&
+                            !_fragments.any(
+                              (fragment) => fragment
+                                  .rectangles(
+                                    0,
+                                    fragment.widget.fragment.end -
+                                        fragment.widget.fragment.start,
+                                  )
+                                  .any(
+                                    (rectangle) => rectangle.contains(position),
+                                  ),
+                            ),
+                        child: PageView.builder(
+                          key: ValueKey(_pagesController),
+                          controller: _pagesController,
+                          physics: _animateTurns
+                              ? const ClampingScrollPhysics()
+                              : const NeverScrollableScrollPhysics(),
+                          onPageChanged: (index) =>
+                              _publishPage(index - leading),
+                          itemCount: _pageViewCount,
+                          itemBuilder: (context, index) {
+                            final local = index - leading;
+                            if (local < 0 || local >= count) {
+                              final direction = local < 0 ? -1 : 1;
+                              final spine =
+                                  widget.engine.locator.spineIndex + direction;
+                              final neighbor =
+                                  _layoutCache[(spine, _geometryKey)];
+                              if (neighbor == null ||
+                                  neighbor.pages.isEmpty ||
+                                  (direction < 0 && !neighbor.complete)) {
+                                return const ReaderLoading();
+                              }
+                              return _spread(
+                                neighbor.pages,
+                                direction > 0
+                                    ? 0
+                                    : (neighbor.pages.length / columns).ceil() -
+                                          1,
+                                columns,
+                                displayPreferences,
+                                spine: spine,
+                              );
                             }
                             return _spread(
-                              neighbor.pages,
-                              direction > 0
-                                  ? 0
-                                  : (neighbor.pages.length / columns).ceil() -
-                                        1,
+                              pages,
+                              local,
                               columns,
                               displayPreferences,
-                              spine: spine,
                             );
-                          }
-                          return _spread(
-                            pages,
-                            local,
-                            columns,
-                            displayPreferences,
-                          );
-                        },
+                          },
+                        ),
                       ),
                     );
                   }

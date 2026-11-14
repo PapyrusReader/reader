@@ -98,6 +98,9 @@ Controls and panels overlay the reading viewport so visibility changes do not
 repaginate content. Page-tap toggles exclude selections, links and competing
 pointer gestures. Keyboard focus survives chapter replacement without stealing
 focus from an open panel. Reduced motion changes transitions, not layout.
+In paginated text formats, mouse drags starting in blank space turn pages;
+drags starting on rendered text remain selection gestures. Mouse turns use the
+same page controller as touch and can interrupt an unfinished turn.
 
 Internal presentation modules are not public API. Host customization uses
 `ReaderUiBuilders` and exported builder contexts. A `compactPanelRoute` factory

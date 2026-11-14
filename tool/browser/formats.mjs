@@ -101,6 +101,41 @@ export async function checkFormats(browser, origin, reader) {
       }
       assert.ok(await next.isVisible(), `${format} reader did not become ready: ${await page.locator('body').innerText()}`);
       assert.ok(await next.isEnabled(), `${format} must have a readable next page`);
+      const previous = page.getByRole('button', { name: 'Previous', exact: true });
+      const mouseSwipe = async direction => {
+        await page.mouse.click(20, 400);
+        await next.waitFor({ state: 'hidden' });
+        await page.waitForTimeout(300);
+        // Start in the page margin so text selection retains its normal drag.
+        await page.mouse.move(direction > 0 ? 930 : 170, 400);
+        await page.mouse.down();
+        await page.mouse.move(direction > 0 ? 170 : 930, 400, { steps: 18 });
+        await page.mouse.up();
+        await page.waitForTimeout(700);
+        await page.mouse.click(20, 400);
+        await previous.waitFor();
+      };
+      const location = async () => {
+        const counter = page.getByRole('button', { name: /^Page \d+ of \d+\. Go to page$/ });
+        if (await counter.count()) {
+          const label = await counter.evaluate(element => element.getAttribute('aria-label') || element.textContent);
+          return `:${label.match(/Page (\d+) of/)[1]}`;
+        }
+        return page.getByRole('group').evaluateAll(elements => {
+          for (const element of elements) {
+            const label = element.getAttribute('aria-label') || element.textContent || '';
+            const match = label.match(/^(?:Chapter (\d+) of .*? · )?Page (\d+) of/);
+            if (match) return `${match[1] ?? ''}:${match[2]}`;
+          }
+          return null;
+        });
+      };
+      const initial = await location();
+      assert.ok(initial, `${format} must expose its committed location`);
+      await mouseSwipe(1);
+      assert.notEqual(await location(), initial, `${format} mouse drag must advance the committed page`);
+      await mouseSwipe(-1);
+      assert.equal(await location(), initial, `${format} reverse mouse drag must restore the initial page`);
       await next.click({ force: true });
       await page.waitForTimeout(500);
       assert.ok(await page.getByRole('button', { name: 'Previous', exact: true }).isEnabled());
@@ -108,7 +143,7 @@ export async function checkFormats(browser, origin, reader) {
         await mkdir(process.env.PAPYRUS_SCREENSHOT_DIR, { recursive: true });
         await page.screenshot({ path: resolve(process.env.PAPYRUS_SCREENSHOT_DIR, `format-${fixture?.replaceAll('/', '-') ?? format}.png`) });
       }
-      console.log(`PASS: ${fixture ?? format} rendered viewport and navigation`);
+      console.log(`PASS: ${fixture ?? format} rendered viewport, mouse swipes, and navigation`);
     }
     assert.deepEqual(errors, []);
   } finally { await page.close(); }
