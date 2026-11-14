@@ -27,9 +27,11 @@ final class _ReaderMousePageDragState extends State<ReaderMousePageDrag> {
   ScrollHoldController? _hold;
   Drag? _drag;
   double _distance = 0;
+  double _lastDelta = 0;
 
   void _down(DragDownDetails details) {
     _distance = 0;
+    _lastDelta = 0;
     if (widget.animate && widget.controller.hasClients) {
       _hold = widget.controller.position.hold(() => _hold = null);
     }
@@ -42,14 +44,28 @@ final class _ReaderMousePageDragState extends State<ReaderMousePageDrag> {
   }
 
   void _update(DragUpdateDetails details) {
-    _distance += details.primaryDelta!;
+    final delta = details.primaryDelta!;
+    _distance += delta;
+    if (delta != 0) _lastDelta = delta;
     _drag?.update(details);
   }
 
   void _end(DragEndDetails details) {
     final drag = _drag;
     _drag = null;
-    drag?.end(details);
+    // A quadratic velocity fit can point backwards after a decelerating drag,
+    // especially with uneven browser event timestamps. Settle where the pointer
+    // left the page instead of flinging against its final movement.
+    final velocity = details.primaryVelocity ?? 0;
+    drag?.end(
+      velocity * _lastDelta < 0
+          ? DragEndDetails(
+              primaryVelocity: 0,
+              globalPosition: details.globalPosition,
+              localPosition: details.localPosition,
+            )
+          : details,
+    );
     _hold?.cancel();
     _hold = null;
     if (!widget.animate && _distance.abs() > 70) {
