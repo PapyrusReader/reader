@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:papyrus_reader/papyrus_reader.dart';
+import 'package:papyrus_reader/src/engine/epub/epub_rich_layout.dart';
 
 import '../support/in_process_epub_worker.dart';
 import '../support/synthetic_epub.dart';
@@ -58,6 +59,64 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('clipped EPUB text cannot block a reverse drag in the margin', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1100, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final engine = testEpubEngine();
+    await engine.load(
+      ReaderDocument(
+        id: 'clipped-margin',
+        format: ReaderFormat.epub,
+        loadBytes: () async => syntheticEpub(longChapter: true),
+      ),
+      preferences: const ReaderPreferences(),
+    );
+    await tester.pumpWidget(
+      MaterialApp(home: Builder(builder: engine.buildViewport)),
+    );
+    await tester.pumpAndSettle();
+    final viewport = find.byType(PageView);
+    final pages = tester.widget<PageView>(viewport).controller!;
+    final bounds = tester.getRect(viewport);
+    pages.jumpTo(bounds.width * .9);
+    await tester.pump();
+    final margin = Rect.fromLTRB(0, 0, bounds.left, 800);
+    final clippedText = tester
+        .stateList<EpubSelectionFragmentState>(
+          find.byType(EpubSelectionFragment),
+        )
+        .expand(
+          (fragment) => fragment.rectangles(
+            0,
+            fragment.widget.fragment.end - fragment.widget.fragment.start,
+          ),
+        )
+        .map((rectangle) => rectangle.intersect(margin))
+        .where((rectangle) => !rectangle.isEmpty);
+    expect(
+      clippedText,
+      isNotEmpty,
+      reason: 'The previous page extends behind the clipped left margin',
+    );
+    final gesture = await tester.startGesture(
+      clippedText.first.center,
+      kind: PointerDeviceKind.mouse,
+    );
+    await gesture.moveBy(const Offset(30, 0));
+    await tester.pump();
+    final before = pages.position.pixels;
+    await gesture.moveBy(const Offset(150, 0));
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(pages.position.pixels, closeTo(before - 150, 1));
+    await gesture.moveBy(const Offset(450, 0));
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(pages.page, 0);
+    expect(tester.takeException(), isNull);
+  });
 
   for (final animation in [true, false]) {
     testWidgets(

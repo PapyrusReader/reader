@@ -68,6 +68,7 @@ final class _EpubViewportState extends State<EpubViewport> {
   bool _busy = false;
   Completer<void>? _layoutReady;
   List<double> _scrollOffsets = const [];
+  final _pageViewportKey = GlobalKey();
   final _selectionKey = GlobalKey<SelectionAreaState>();
   final _selectionMenuController = ContextMenuController();
   int _menuRevision = 0;
@@ -86,6 +87,25 @@ final class _EpubViewportState extends State<EpubViewport> {
 
     _selectionKey.currentContext?.visitChildElements(visit);
     return fragments;
+  }
+
+  bool _canStartMouseDrag(Offset position) {
+    if (_selectedText.isNotEmpty) return false;
+    final viewport =
+        _pageViewportKey.currentContext?.findRenderObject() as RenderBox?;
+    if (viewport == null) return false;
+    final bounds = viewport.localToGlobal(Offset.zero) & viewport.size;
+    // Neighbour pages may remain mounted while clipped. Their text rectangles
+    // must not claim pointer input in the blank margins outside the PageView.
+    if (!bounds.contains(position)) return true;
+    return !_fragments.any(
+      (fragment) => fragment
+          .rectangles(
+            0,
+            fragment.widget.fragment.end - fragment.widget.fragment.start,
+          )
+          .any((rectangle) => rectangle.contains(position)),
+    );
   }
 
   Rect? _visibleBounds(Iterable<Rect> rectangles) {
@@ -1278,19 +1298,10 @@ final class _EpubViewportState extends State<EpubViewport> {
                     controller: _pagesController,
                     animate: _animateTurns,
                     onTurn: _requestTurn,
-                    canStart: (position) =>
-                        _selectedText.isEmpty &&
-                        !_fragments.any(
-                          (fragment) => fragment
-                              .rectangles(
-                                0,
-                                fragment.widget.fragment.end -
-                                    fragment.widget.fragment.start,
-                              )
-                              .any((rectangle) => rectangle.contains(position)),
-                        ),
+                    canStart: _canStartMouseDrag,
                     child: Center(
                       child: SizedBox(
+                        key: _pageViewportKey,
                         width: width,
                         child: PageView.builder(
                           key: ValueKey(_pagesController),
