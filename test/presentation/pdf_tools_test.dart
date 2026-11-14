@@ -421,6 +421,114 @@ void main() {
 
   for (final zoomed in [false, true]) {
     testWidgets(
+      'PDF decelerating mouse swipe keeps its direction, zoomed $zoomed',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(800, 600));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final bytes = await tester.runAsync(_document);
+        await tester.runAsync(initializePdfiumForTest);
+        final facade = (await tester.runAsync(
+          () => createPdfrxFacade(bytes!, sourceName: 'decelerating-mouse'),
+        ))!;
+        final tools = facade as PdfReaderTools;
+        addTearDown(() => (facade as DisposablePdfFacade).dispose());
+        await tester.pumpWidget(
+          MaterialApp(
+            home: facade.buildViewport(
+              PdfViewportConfiguration(
+                pageIndex: 0,
+                facingPages: false,
+                backgroundColor: Colors.white,
+                brightness: Brightness.light,
+                layoutMode: ReaderLayoutMode.paginated,
+                onPageChanged: (_) {},
+              ),
+            ),
+          ),
+        );
+        await _ready(tester, tools);
+        await tester.pumpAndSettle();
+        if (zoomed) {
+          await tools.setZoom(tools.zoom * 2);
+          await tester.pumpAndSettle();
+        }
+        final pages = tester
+            .widget<PageView>(find.byType(PageView))
+            .controller!;
+        for (final direction in [1, -1]) {
+          final before = tools.pageNumber;
+          final start = Offset(direction > 0 ? 700 : 100, 300);
+          final gesture = await tester.startGesture(
+            start,
+            kind: PointerDeviceKind.mouse,
+          );
+          for (final sample in [
+            (10, 100),
+            (20, 300),
+            (30, 500),
+            (60, 600),
+            (80, 601),
+            (100, 602),
+          ]) {
+            await gesture.moveTo(
+              start - Offset(sample.$2 * direction.toDouble(), 0),
+              timeStamp: Duration(milliseconds: sample.$1),
+            );
+            await tester.pump();
+          }
+          expect(pages.page, closeTo(before - 1 + direction * .7525, .001));
+          await gesture.up(timeStamp: const Duration(milliseconds: 101));
+          await tester.pumpAndSettle();
+          expect(tools.pageNumber, before + direction);
+        }
+        // Deliberately reversing before release still returns to this page.
+        final reverse = await tester.startGesture(
+          const Offset(700, 300),
+          kind: PointerDeviceKind.mouse,
+        );
+        for (final sample in [(10, 30), (20, 600), (50, 550), (60, 500)]) {
+          await reverse.moveTo(
+            Offset(700 - sample.$2.toDouble(), 300),
+            timeStamp: Duration(milliseconds: sample.$1),
+          );
+          await tester.pump();
+        }
+        await reverse.up(timeStamp: const Duration(milliseconds: 61));
+        await tester.pumpAndSettle();
+        expect(tools.pageNumber, 1);
+        // Catch the incoming, inactive viewer before the current turn settles.
+        // Its mouse recognizer must use the same release direction guard.
+        pages.jumpTo(600);
+        await tester.pump();
+        final incoming = await tester.startGesture(
+          const Offset(700, 300),
+          kind: PointerDeviceKind.mouse,
+        );
+        for (final sample in [
+          (10, 100),
+          (20, 300),
+          (30, 500),
+          (60, 600),
+          (80, 601),
+          (100, 602),
+        ]) {
+          await incoming.moveTo(
+            Offset(700 - sample.$2.toDouble(), 300),
+            timeStamp: Duration(milliseconds: sample.$1),
+          );
+          await tester.pump();
+        }
+        expect(pages.page, closeTo(1.5025, .001));
+        await incoming.up(timeStamp: const Duration(milliseconds: 101));
+        await tester.pumpAndSettle();
+        expect(tools.pageNumber, 3);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+  }
+
+  for (final zoomed in [false, true]) {
+    testWidgets(
       'PDF mouse hold and release keeps navigation and selection alive, zoomed $zoomed',
       (tester) async {
         await tester.binding.setSurfaceSize(const Size(1440, 900));

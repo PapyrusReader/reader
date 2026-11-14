@@ -10,6 +10,7 @@ import '../../domain/reader_types.dart';
 import '../../domain/reader_selection.dart';
 import '../../domain/reader_locator.dart';
 import '../../presentation/reader_page_wheel.dart';
+import '../../presentation/reader_mouse_page_drag.dart';
 import '../../presentation/reader_interaction_scope.dart';
 import '../../presentation/reader_swipe_tracker.dart';
 import '../../presentation/reader_highlight_interaction.dart';
@@ -517,6 +518,7 @@ final class _PdfrxFacade extends PdfReaderTools
   bool _textSelected = false;
   PageController? _pagesController;
   Drag? _pageDrag;
+  double _lastPageDragDelta = 0;
   bool _pagingEnabled = false;
   bool _pageSwipeEnabled = false;
   Offset? _instantMouseDrag;
@@ -1072,28 +1074,33 @@ final class _PdfrxFacade extends PdfReaderTools
                         },
                         child: ScrollConfiguration(
                           behavior: ScrollConfiguration.of(context).copyWith(
-                            // The incoming viewer is inactive until settlement.
-                            // Its parent must still accept a mouse drag mid-turn.
                             dragDevices: {
                               if (!_restoring && _atFit)
                                 ...ScrollConfiguration.of(context).dragDevices,
-                              PointerDeviceKind.mouse,
-                            },
+                            }..remove(PointerDeviceKind.mouse),
                           ),
-                          child: PageView.builder(
-                            key: ValueKey(pages),
+                          // Inactive incoming viewers ignore pointers. Keep their
+                          // mouse drags on the same guarded release path as EPUB.
+                          child: ReaderMousePageDrag(
                             controller: pages,
-                            allowImplicitScrolling: true,
-                            physics: _pagingEnabled
-                                ? const ClampingScrollPhysics()
-                                : const NeverScrollableScrollPhysics(),
-                            itemCount: (pageCount / _spreadStep).ceil(),
-                            itemBuilder: (context, index) => SizedBox.expand(
-                              key: ValueKey(('pdf-spread', index)),
-                              child: _PdfSpreadLoader(
-                                pages: pages,
-                                index: index,
-                                builder: (_) => buildViewer(index),
+                            animate: _pagingEnabled,
+                            canStart: (_) => _pageSwipeEnabled,
+                            onTurn: (direction) => _turnSpread(direction),
+                            child: PageView.builder(
+                              key: ValueKey(pages),
+                              controller: pages,
+                              allowImplicitScrolling: true,
+                              physics: _pagingEnabled
+                                  ? const ClampingScrollPhysics()
+                                  : const NeverScrollableScrollPhysics(),
+                              itemCount: (pageCount / _spreadStep).ceil(),
+                              itemBuilder: (context, index) => SizedBox.expand(
+                                key: ValueKey(('pdf-spread', index)),
+                                child: _PdfSpreadLoader(
+                                  pages: pages,
+                                  index: index,
+                                  builder: (_) => buildViewer(index),
+                                ),
                               ),
                             ),
                           ),
@@ -1136,6 +1143,7 @@ final class _PdfrxFacade extends PdfReaderTools
   }
 
   void _startPageDrag(ScaleStartDetails details) {
+    _lastPageDragDelta = 0;
     final start = _pagePointerStart;
     final mouse =
         details.pointerCount == 1 && start?.kind == PointerDeviceKind.mouse;
@@ -1180,6 +1188,8 @@ final class _PdfrxFacade extends PdfReaderTools
       _pagesController?.jumpToPage(_pageIndex ~/ _spreadStep);
       return;
     }
+    final delta = details.focalPointDelta.dx;
+    if (delta != 0) _lastPageDragDelta = delta;
     drag.update(
       DragUpdateDetails(
         globalPosition: details.focalPoint,
@@ -1199,12 +1209,14 @@ final class _PdfrxFacade extends PdfReaderTools
     }
     final drag = _pageDrag;
     _pageDrag = null;
+    // Decelerating pointer samples can produce an estimated velocity opposite
+    // to the final movement. Do not let that fling the page backwards.
+    final estimate = details.velocity.pixelsPerSecond.dx;
+    final velocity = estimate * _lastPageDragDelta < 0 ? 0.0 : estimate;
     drag?.end(
       DragEndDetails(
-        velocity: Velocity(
-          pixelsPerSecond: Offset(details.velocity.pixelsPerSecond.dx, 0),
-        ),
-        primaryVelocity: details.velocity.pixelsPerSecond.dx,
+        velocity: Velocity(pixelsPerSecond: Offset(velocity, 0)),
+        primaryVelocity: velocity,
       ),
     );
   }
