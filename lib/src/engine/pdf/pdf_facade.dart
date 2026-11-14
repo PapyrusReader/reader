@@ -337,6 +337,7 @@ final class _PdfrxFacade extends PdfReaderTools
   Future<void> setZoom(double value) async {
     if (!isReady || !value.isFinite) return;
     _fitMode = PdfFitMode.custom;
+    _mousePanX = null;
     await _controller.setZoom(
       _controller.visibleRect.center,
       value.clamp(minimumZoom, maximumZoom),
@@ -473,6 +474,7 @@ final class _PdfrxFacade extends PdfReaderTools
   });
 
   Future<bool> _activatePage(int index) async {
+    _mousePanX = null;
     final hadFocus =
         _controller.isReady && (_controller.focusNode?.hasFocus ?? false);
     _pageIndex = index;
@@ -517,6 +519,8 @@ final class _PdfrxFacade extends PdfReaderTools
   Drag? _pageDrag;
   bool _pagingEnabled = false;
   final Set<int> _pagePointers = {};
+  PointerDownEvent? _pagePointerStart;
+  double? _mousePanX;
   bool _multiTouch = false;
   int get _spreadStep => _configuration?.facingPages == true ? 2 : 1;
 
@@ -602,6 +606,7 @@ final class _PdfrxFacade extends PdfReaderTools
   }) async {
     final config = _configuration;
     if (config == null) return;
+    _mousePanX = null;
     _fitMode ??= config.layoutMode == ReaderLayoutMode.paginated
         ? PdfFitMode.page
         : PdfFitMode.width;
@@ -802,7 +807,6 @@ final class _PdfrxFacade extends PdfReaderTools
               configuration.pageTurnAnimation &&
               !MediaQuery.disableAnimationsOf(context) &&
               !_restoring &&
-              _atFit &&
               !_textSelected &&
               !_multiTouch;
           Widget buildViewer(int index) {
@@ -917,6 +921,8 @@ final class _PdfrxFacade extends PdfReaderTools
                                   margin: params.margin,
                                 )
                           : null,
+                      panX: () =>
+                          active() && !_applyingView ? _mousePanX : null,
                       onInteractionStart: _startPageDrag,
                       onInteractionUpdate: _updatePageDrag,
                       onInteractionEnd: _endPageDrag,
@@ -1049,6 +1055,7 @@ final class _PdfrxFacade extends PdfReaderTools
                   ? buildViewer(0)
                   : Listener(
                       onPointerDown: _pagePointerDown,
+                      onPointerSignal: (_) => _mousePanX = null,
                       onPointerUp: _pagePointerEnded,
                       onPointerCancel: _pagePointerEnded,
                       child: NotificationListener<ScrollEndNotification>(
@@ -1063,7 +1070,8 @@ final class _PdfrxFacade extends PdfReaderTools
                             // The incoming viewer is inactive until settlement.
                             // Its parent must still accept a mouse drag mid-turn.
                             dragDevices: {
-                              ...ScrollConfiguration.of(context).dragDevices,
+                              if (!_restoring && _atFit)
+                                ...ScrollConfiguration.of(context).dragDevices,
                               PointerDeviceKind.mouse,
                             },
                           ),
@@ -1096,6 +1104,10 @@ final class _PdfrxFacade extends PdfReaderTools
 
   void _pagePointerDown(PointerDownEvent event) {
     _pagePointers.add(event.pointer);
+    if (_pagePointers.length == 1) {
+      _pagePointerStart = event;
+      _mousePanX = null;
+    }
     if (_pagePointers.length > 1 && !_multiTouch) {
       _multiTouch = true;
       _pageDrag?.cancel();
@@ -1117,12 +1129,24 @@ final class _PdfrxFacade extends PdfReaderTools
   }
 
   void _startPageDrag(ScaleStartDetails details) {
+    final start = _pagePointerStart;
+    final mouse =
+        details.pointerCount == 1 && start?.kind == PointerDeviceKind.mouse;
+    _mousePanX = null;
     final pages = _pagesController;
     if (!_pagingEnabled ||
         pages == null ||
         !pages.hasClients ||
         details.pointerCount != 1) {
       return;
+    }
+    // The page controller owns horizontal mouse motion, including its fling.
+    // Keep the zoomed document still inside its moving page slot.
+    _mousePanX = mouse ? _controller.visibleRect.center.dx : null;
+    if (!_atFit) {
+      if (!mouse) return;
+      final delta = details.focalPoint - start!.position;
+      if (delta.dx.abs() <= delta.dy.abs()) return;
     }
     _pageDrag = pages.position.drag(
       DragStartDetails(globalPosition: details.focalPoint),
@@ -1443,6 +1467,7 @@ PdfViewerParams buildPdfViewerParams(
   ValueChanged<PdfLink>? onLink,
   PdfViewerOverlaysBuilder? viewerOverlayBuilder,
   PdfViewerGeneralTapHandler? onGeneralTap,
+  double? Function()? panX,
   GestureScaleStartCallback? onInteractionStart,
   GestureScaleUpdateCallback? onInteractionUpdate,
   GestureScaleEndCallback? onInteractionEnd,
@@ -1581,7 +1606,7 @@ PdfViewerParams buildPdfViewerParams(
             return controller.calcMatrixFor(
               Offset(
                 clampCenter(
-                  visible.center.dx,
+                  panX?.call() ?? visible.center.dx,
                   rect.left,
                   rect.right,
                   viewSize.width / (2 * zoom),

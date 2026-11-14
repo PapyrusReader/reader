@@ -69,8 +69,8 @@ try {
     await page.waitForTimeout(1500);
     const cdp = await page.context().newCDPSession(page);
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: Number(process.env.PAPYRUS_PDF_CPU_RATE ?? 1) });
-    const swipe = async (direction = 1) => {
-      const x = direction > 0 ? width * .97 : width * .03;
+    const swipe = async (direction = 1, inside = false) => {
+      const x = direction > 0 ? width * (inside ? .8 : .97) : width * (inside ? .2 : .03);
       const point = offset => [{ x: x - direction * offset, y: 350, id: 1 }];
       if (input === 'mouse') {
         await page.mouse.move(x, 350);
@@ -79,7 +79,7 @@ try {
         await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: point(0) });
       }
       for (let step = 1; step <= 18; step++) {
-        const offset = step * width * .94 / 18;
+        const offset = step * width * (inside ? .7 : .94) / 18;
         if (input === 'mouse') {
           await page.mouse.move(x - direction * offset, 350);
         } else {
@@ -195,6 +195,32 @@ try {
     await page.getByRole('button', { name: 'Zoom 200 percent. Set zoom', exact: true }).waitFor();
     assert.deepEqual(errors, []);
     console.log(`PASS: ${width}px zoomed PDF wheel pans within pages and turns at both edges`);
+    if (input === 'mouse') {
+      await page.keyboard.press('Escape');
+      for (let turn = 0; turn < 3; turn++) {
+        await swipe(1, true);
+        await page.waitForTimeout(70);
+      }
+      await page.waitForTimeout(700);
+      await assertPage(7);
+      await swipe(-1, true);
+      await page.waitForTimeout(700);
+      await assertPage(6);
+      const text = await page.getByText('Swipe page 6.', { exact: true }).boundingBox();
+      assert.ok(text);
+      await page.mouse.move(text.x + 2, text.y + text.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(text.x + text.width - 2, text.y + text.height / 2, { steps: 12 });
+      await page.mouse.up();
+      await page.getByRole('button', { name: 'Copy', exact: true }).waitFor();
+      await page.mouse.click(width * .9, 450);
+      await page.waitForTimeout(300);
+      await assertPage(6);
+      await page.keyboard.press('Escape');
+      await page.getByRole('button', { name: 'Zoom 200 percent. Set zoom', exact: true }).waitFor();
+      assert.deepEqual(errors, []);
+      console.log('PASS: zoomed PDF rapid mouse drags, reverse turn, retained zoom, and text selection');
+    }
     await page.close();
   }
 } finally {

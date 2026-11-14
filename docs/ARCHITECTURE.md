@@ -78,7 +78,10 @@ Speculative viewers initialize while paging is stationary; visible destinations
 can load immediately. Paginated viewers share layout until viewport or page
 dimensions change, and preview images use stable resolution steps sized for the
 screen, up to the renderer's one-pass limit. Holding an in-flight turn does not
-commit or snap its location.
+commit or snap its location. Horizontal mouse drags turn pages at custom zoom,
+while vertical drags pan and text drags select. During a mouse turn the PDF keeps
+its horizontal position inside the moving spread; the viewer does not also pan.
+Zoomed touch gestures retain document panning and pinch zoom.
 
 The host persists the synchronized locator separately from `PdfViewState`, which
 is device-local view configuration. `ReaderDocument.initialPdfView` and
