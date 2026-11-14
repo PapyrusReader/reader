@@ -6,6 +6,7 @@ import { dirname, extname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { checkFormats } from './formats.mjs';
+import { checkMobileEpubScroll } from './epub_scroll.mjs';
 
 const reader = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const dist = resolve(reader, 'example/build/web');
@@ -158,10 +159,11 @@ try {
     await settle();
   };
   const appearance = async name => {
-    const chip = page.getByLabel(name, { exact: true });
-    await click(chip);
-    await chip.waitForFunction(element => ['aria-checked', 'aria-pressed', 'aria-selected']
-      .some(attribute => element.getAttribute(attribute) === 'true'));
+    await click(page.getByRole('button', { name: /Page appearance/ }));
+    const option = page.getByRole('menuitem', { name, exact: true });
+    await click(option);
+    await option.waitFor({ state: 'hidden' });
+    await page.getByRole('button', { name: new RegExp(`${name}.*Page appearance|Page appearance.*${name}`, 's') }).waitFor();
     await settle();
   };
   const select = async (current, target) => {
@@ -195,12 +197,21 @@ try {
     'A page turn keeps its place, while emphasis and meaning remain part of the story. ' +
     'Resize the window or change the typeface to try reflow.', { exact: true }).first();
   const beforeWheel = await paragraph.boundingBox();
+  const location = page.getByRole('group', { name: /^Chapter \d+ of/ }).first();
+  const beforeWheelLocation = await location.getAttribute('aria-label');
   await page.mouse.move(160, 300);
-  await page.mouse.wheel(0, 600);
+  await page.mouse.wheel(0, 1);
+  await page.waitForFunction(previous =>
+    document.querySelector('[aria-label^="Chapter "]')?.getAttribute('aria-label') !== previous,
+  beforeWheelLocation);
+  await page.mouse.wheel(0, -1);
+  await page.waitForFunction(previous =>
+    document.querySelector('[aria-label^="Chapter "]')?.getAttribute('aria-label') === previous,
+  beforeWheelLocation);
   await settle();
   const afterWheel = await paragraph.boundingBox();
   assert.ok(beforeWheel && afterWheel && Math.abs(beforeWheel.y - afterWheel.y) < 1,
-    'A normal paginated column must fit without hidden vertical overflow');
+    'A wheel turn and reversal must restore the same page geometry');
   await openSettings();
   await select('Slide', 'None');
   await screenshot('desktop-instant-turns');
@@ -283,6 +294,41 @@ try {
   }
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Back', exact: true }).waitFor();
+  await settle();
+  await backToLibrary();
+  const continuousBook = resolve(temp, 'continuous-scroll.epub');
+  await writeFile(continuousBook, await readFile(resolve(reader, 'example/assets/reading_lab.epub')));
+  await openFile(continuousBook);
+  await showInitialControls(page.getByText('At the Gate', { exact: true }).first());
+  await openSettings();
+  await select('Paginated', 'Continuous scroll');
+  await closeSettings();
+  await screenshot('epub-continuous-initial');
+  const continuousParagraph = page.getByText(/^At the Gate/).first();
+  let paragraphBounds = await continuousParagraph.boundingBox();
+  assert.ok(paragraphBounds);
+  for (const x of [20, 1260]) {
+    await page.mouse.move(x, 450);
+    await page.mouse.wheel(0, 60);
+    await page.waitForTimeout(250);
+    await settle();
+    const moved = await continuousParagraph.boundingBox();
+    assert.ok(moved && moved.y + moved.height < paragraphBounds.y + paragraphBounds.height,
+      'Wheel input in either outer margin must scroll the EPUB text');
+    paragraphBounds = moved;
+  }
+  await screenshot('epub-continuous-full-width');
+  await page.mouse.wheel(0, 100000);
+  await settle();
+  await page.waitForTimeout(150);
+  await page.mouse.wheel(0, 1);
+  await page.getByRole('group', { name: /^Chapter 2 of 2/ }).first().waitFor();
+  await settle();
+  await page.mouse.wheel(0, -1);
+  await page.getByRole('group', { name: /^Chapter 1 of 2/ }).first().waitFor();
+  await settle();
+  await page.mouse.wheel(0, 1);
+  await page.getByRole('group', { name: /^Chapter 2 of 2/ }).first().waitFor();
   await settle();
   await backToLibrary();
   await page.setViewportSize({ width: 700, height: 360 });
@@ -427,6 +473,7 @@ try {
   await backToLibrary();
   await page.getByRole('button', { name: 'Use light theme', exact: true }).waitFor();
   assert.deepEqual(errors, []);
+  await checkMobileEpubScroll(browser, origin);
   await checkFormats(browser, origin, reader);
   console.log('Browser checks passed: worker protocol, focus mode and chapter keyboard focus, responsive settings, local files, cleanup, PDF pagination/scroll, column/appearance refitting and opened menus under opposite app themes.');
 } finally {

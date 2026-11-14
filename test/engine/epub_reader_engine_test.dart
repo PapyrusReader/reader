@@ -614,7 +614,8 @@ void main() {
       await tester.pumpAndSettle();
 
       var pageView = tester.widget<PageView>(find.byType(PageView));
-      final pageCount = pageView.childrenDelegate.estimatedChildCount!;
+      // The trailing item is the first page of the following chapter.
+      final pageCount = pageView.childrenDelegate.estimatedChildCount! - 1;
       expect(pageView.controller, isNotNull);
       expect(
         pageView.controller!.page,
@@ -739,7 +740,8 @@ void main() {
 
       await tester.pumpWidget(viewport());
       await tester.pumpAndSettle();
-      await tester.drag(find.byType(ListView), const Offset(0, -100000));
+      final scroll = tester.widget<ListView>(find.byType(ListView)).controller!;
+      scroll.jumpTo(scroll.position.maxScrollExtent);
       await tester.pumpAndSettle();
 
       var locator = await engine.currentLocator() as EpubReaderLocator;
@@ -756,7 +758,8 @@ void main() {
 
       await tester.pumpWidget(viewport());
       await tester.pumpAndSettle();
-      await tester.drag(find.byType(ListView), const Offset(0, -100000));
+      final last = tester.widget<ListView>(find.byType(ListView)).controller!;
+      last.jumpTo(last.position.maxScrollExtent);
       await tester.pumpAndSettle();
 
       locator = await engine.currentLocator() as EpubReaderLocator;

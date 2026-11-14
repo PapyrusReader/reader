@@ -370,7 +370,11 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.dragFrom(const Offset(500, 400), const Offset(-200, 0));
+      await tester.flingFrom(
+        const Offset(500, 400),
+        const Offset(-200, 0),
+        1000,
+      );
       await tester.pumpAndSettle();
       expect(engine.locator.spineIndex, 1);
       await tester.pumpWidget(const SizedBox.shrink());

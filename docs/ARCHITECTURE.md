@@ -70,6 +70,19 @@ view center survive viewport/layout changes; fit modes adapt to the available
 space. Paginated slots isolate spreads even when zoomed out. pdfrx owns rendering,
 selection, and bounded text search. `PdfReaderTools` exposes zoom, fit, page entry,
 search, and a bounded return history to the shell without exposing PDFium types.
+Each paginated spread retains its viewer and rendered images through a swipe and
+settlement. Neighboring viewers mount lazily and release their resources when
+evicted from the page cache. Search results belong to the document; navigation and
+keyboard focus follow the active spread.
+Speculative viewers initialize while paging is stationary; visible destinations
+can load immediately. Paginated viewers share layout until viewport or page
+dimensions change, and preview images use stable resolution steps sized for the
+screen, up to the renderer's one-pass limit. Holding an in-flight turn does not
+commit or snap its location. Horizontal mouse drags turn pages at custom zoom,
+while vertical drags pan and text drags select. During a mouse turn the PDF keeps
+its horizontal position inside the moving spread; the viewer does not also pan.
+Zoomed touch gestures retain document panning and pinch zoom. With animation disabled
+or reduced motion enabled, mouse turns commit instantly on release.
 
 The host persists the synchronized locator separately from `PdfViewState`, which
 is device-local view configuration. `ReaderDocument.initialPdfView` and
@@ -89,6 +102,25 @@ Controls and panels overlay the reading viewport so visibility changes do not
 repaginate content. Page-tap toggles exclude selections, links and competing
 pointer gestures. Keyboard focus survives chapter replacement without stealing
 focus from an open panel. Reduced motion changes transitions, not layout.
+In paginated text formats, mouse drags starting in blank space, including the
+outer window margins, turn pages;
+drags starting on rendered text remain selection gestures. Mouse turns use the
+same page controller as touch and can interrupt an unfinished turn.
+Wheel input turns paginated pages immediately without changing the animation
+preference. Small nonzero deltas count as a turn; same-direction bursts are
+limited to one turn per 120 ms, while reversing direction responds immediately.
+Zoomed PDFs pan within the current spread; scrolling outward at its top or bottom
+turns the page without animation. Forward turns open at the top, backward turns
+at the bottom, preserving zoom. Horizontal zoomed panning, continuous readers,
+and modifier-key zoom retain native wheel input.
+Continuous EPUB uses a full-width scroll surface with centered text and a viewport-edge
+scrollbar. Its chunk extents use the rendered fragment heights, including text reshaping
+at paragraph cuts. Outward wheel input at a chapter edge opens the adjacent chapter;
+backward navigation restores its bottom. Touch drags can reach and continue beyond
+an edge in one gesture, including under bouncing physics. Only a completed,
+unselected single-touch gesture commits the adjacent chapter; inertial scrolling
+and cancelled gestures do not trigger a chapter turn. Custom scrolling renderers
+share the same chapter boundary gestures.
 
 Internal presentation modules are not public API. Host customization uses
 `ReaderUiBuilders` and exported builder contexts. A `compactPanelRoute` factory

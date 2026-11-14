@@ -9,6 +9,8 @@ import 'package:pdfrx/pdfrx.dart';
 import '../../domain/reader_types.dart';
 import '../../domain/reader_selection.dart';
 import '../../domain/reader_locator.dart';
+import '../../presentation/reader_page_wheel.dart';
+import '../../presentation/reader_mouse_page_drag.dart';
 import '../../presentation/reader_interaction_scope.dart';
 import '../../presentation/reader_swipe_tracker.dart';
 import '../../presentation/reader_highlight_interaction.dart';
@@ -46,6 +48,7 @@ final class PdfViewportConfiguration {
     required this.layoutMode,
     required this.onPageChanged,
     this.highlightLinks = true,
+    this.pageTurnAnimation = true,
     this.onPositionChanged,
     this.onVisiblePagesChanged,
     this.onContentReadyChanged,
@@ -54,6 +57,7 @@ final class PdfViewportConfiguration {
   final int pageIndex;
   final bool facingPages;
   final bool highlightLinks;
+  final bool pageTurnAnimation;
   final Color backgroundColor;
   final Brightness brightness;
   final ReaderLayoutMode layoutMode;
@@ -195,8 +199,8 @@ final class _PdfrxFacade extends PdfReaderTools
        _savedView = initialView,
        _preferInitialLocator = preferInitialLocator,
        _fitMode = initialView?.fitMode {
-    _controller.addListener(_positionChanged);
-    _searcher = PdfTextSearchSession(_controller)..addListener(_searchChanged);
+    _searcher = _PdfSearchSession(() => _controller)
+      ..addListener(_searchChanged);
   }
 
   final PdfDocumentRef _documentRef;
@@ -283,13 +287,17 @@ final class _PdfrxFacade extends PdfReaderTools
     if (!isReady || index < 0 || index >= _searcher.matches.length) return;
     final previous = _captureView();
     final match = _searcher.matches[index];
-    _pageIndex = match.pageNumber - 1;
+    if (!await _activatePage(match.pageNumber - 1)) return;
     _fitMode = PdfFitMode.custom;
     final rect = _controller.calcRectForRectInsidePage(
       pageNumber: match.pageNumber,
       rect: match.bounds,
     );
-    await _controller.setZoom(rect.center, zoom, duration: Duration.zero);
+    await _controller.setZoom(
+      rect.center,
+      previous?.zoom ?? zoom,
+      duration: Duration.zero,
+    );
     await _searcher.goToMatchOfIndex(index);
     _rememberLocation(previous);
     _positionChanged();
@@ -319,7 +327,7 @@ final class _PdfrxFacade extends PdfReaderTools
     final target = source.last;
     _savedView = target;
     _fitMode = target.fitMode;
-    _pageIndex = target.pageIndex;
+    if (!await _activatePage(target.pageIndex)) return;
     await _restorePage(restoreLocation: true);
     source.removeLast();
     destination.add(current);
@@ -330,6 +338,7 @@ final class _PdfrxFacade extends PdfReaderTools
   Future<void> setZoom(double value) async {
     if (!isReady || !value.isFinite) return;
     _fitMode = PdfFitMode.custom;
+    _mousePanX = null;
     await _controller.setZoom(
       _controller.visibleRect.center,
       value.clamp(minimumZoom, maximumZoom),
@@ -371,7 +380,7 @@ final class _PdfrxFacade extends PdfReaderTools
         return;
       }
       final previous = _captureView();
-      _pageIndex = destination.pageNumber - 1;
+      if (!await _activatePage(destination.pageNumber - 1)) return;
       _fitMode = PdfFitMode.custom;
       await _controller.goToDest(destination, duration: Duration.zero);
       _rememberLocation(previous);
@@ -381,7 +390,7 @@ final class _PdfrxFacade extends PdfReaderTools
     }
   }
 
-  PdfViewerHandleLinkTap? _handleLinkTap;
+  PdfViewerHandleLinkTap? get _handleLinkTap => _activeSpread.handleLinkTap;
   final Set<int> _linkPointers = {};
   PointerDownEvent? _linkStart;
   bool _linkTapHandled = false;
@@ -448,8 +457,55 @@ final class _PdfrxFacade extends PdfReaderTools
     );
   }
 
-  final PdfViewerController _controller = PdfViewerController();
-  int _pageIndex = 0;
+  final Map<int, _PdfSpread> _spreads = {};
+  PdfPageLayout? _pageLayout;
+  StreamSubscription<PdfDocumentEvent>? _documentEvents;
+  PdfViewerController get _controller => _activeSpread.controller;
+  int get _spreadIndex => _configuration?.layoutMode == ReaderLayoutMode.scroll
+      ? 0
+      : _pageIndex ~/ _spreadStep;
+  _PdfSpread get _activeSpread => _spreadFor(_spreadIndex);
+
+  _PdfSpread _spreadFor(int index) => _spreads.putIfAbsent(index, () {
+    final spread = _PdfSpread();
+    spread.controller.addListener(() {
+      if (!_disposed && identical(spread, _activeSpread)) _positionChanged();
+    });
+    return spread;
+  });
+
+  Future<bool> _activatePage(int index) async {
+    _mousePanX = null;
+    final hadFocus =
+        _controller.isReady && (_controller.focusNode?.hasFocus ?? false);
+    _pageIndex = index;
+    if (_viewKey == null) return !_disposed;
+    final revision = _viewerRevision;
+    await _activeSpread.ready.future;
+
+    if (_disposed || revision != _viewerRevision || _pageIndex != index) {
+      return false;
+    }
+
+    if (hadFocus && _controller.isReady) {
+      _controller.requestFocus();
+    }
+
+    return true;
+  }
+
+  int _currentPageIndex = 0;
+  int get _pageIndex => _currentPageIndex;
+  set _pageIndex(int value) {
+    if (_currentPageIndex == value) return;
+    _currentPageIndex = value;
+    final pages = _pagesController;
+    if (pages != null && pages.hasClients) {
+      pages.jumpToPage(value ~/ _spreadStep);
+    }
+    notifyListeners();
+  }
+
   double _pageOffset = 0;
   final VoidCallback? _releaseDocument;
   PdfViewportConfiguration? _configuration;
@@ -458,9 +514,19 @@ final class _PdfrxFacade extends PdfReaderTools
   bool _disposed = false;
   Object? _viewKey;
   int _viewerRevision = 0;
-  DateTime? _lastWheelTurn;
   final _swipe = ReaderSwipeTracker();
   bool _textSelected = false;
+  PageController? _pagesController;
+  Drag? _pageDrag;
+  double _lastPageDragDelta = 0;
+  bool _pagingEnabled = false;
+  bool _pageSwipeEnabled = false;
+  Offset? _instantMouseDrag;
+  final Set<int> _pagePointers = {};
+  PointerDownEvent? _pagePointerStart;
+  double? _mousePanX;
+  bool _multiTouch = false;
+  int get _spreadStep => _configuration?.facingPages == true ? 2 : 1;
 
   @override
   final int pageCount;
@@ -469,15 +535,29 @@ final class _PdfrxFacade extends PdfReaderTools
   final List<PdfFacadeOutlineEntry> outline;
 
   @override
-  Future<void> showPage(int pageIndex, double pageOffset) async {
+  Future<void> showPage(int pageIndex, double pageOffset) =>
+      _showPage(pageIndex, pageOffset);
+
+  Future<void> _showPage(
+    int pageIndex,
+    double pageOffset, {
+    bool alignBottom = false,
+  }) async {
     final previous = _captureView();
-    _pageIndex = pageIndex;
     _pageOffset = pageOffset;
+    if (!await _activatePage(pageIndex)) return;
+    final pages = _pagesController;
+    if (pages != null && pages.hasClients) {
+      pages.jumpToPage(pageIndex ~/ _spreadStep);
+    }
     if (_controller.isReady && !_restoring) {
       _savedView = null;
       _restoring = true;
       try {
-        await _restorePage();
+        await _restorePage(
+          zoomOverride: previous?.zoom,
+          alignBottom: alignBottom,
+        );
       } finally {
         _restoring = false;
       }
@@ -500,23 +580,54 @@ final class _PdfrxFacade extends PdfReaderTools
   bool get _atFit =>
       _controller.isReady && _controller.currentZoom <= _fitZoom * 1.02;
 
+  bool _canTurnWithWheel(Offset delta) {
+    if (_disposed ||
+        _restoring ||
+        _configuration?.layoutMode != ReaderLayoutMode.paginated ||
+        !_controller.isReady) {
+      return false;
+    }
+    if (_atFit) return true;
+    if (delta.dy.abs() <= delta.dx.abs()) return false;
+
+    final visible = _controller.visibleRect;
+    final tolerance = 1 / zoom;
+    return delta.dy < 0
+        ? visible.top <= _spread.top + tolerance
+        : visible.bottom >= _spread.bottom - tolerance;
+  }
+
   double _zoomFor(PdfFitMode mode) => switch (mode) {
     PdfFitMode.page => _fitZoom,
     PdfFitMode.width => _controller.viewSize.width / _spread.width,
     PdfFitMode.custom => _savedView?.zoom ?? zoom,
   };
 
-  Future<void> _restorePage({bool restoreLocation = false}) async {
+  Future<void> _restorePage({
+    bool restoreLocation = false,
+    double? zoomOverride,
+    bool alignBottom = false,
+  }) async {
     final config = _configuration;
     if (config == null) return;
+    _mousePanX = null;
     _fitMode ??= config.layoutMode == ReaderLayoutMode.paginated
         ? PdfFitMode.page
         : PdfFitMode.width;
-    final scale = _zoomFor(_fitMode!).clamp(.1, 8.0);
+    final scale =
+        (_fitMode == PdfFitMode.custom && zoomOverride != null
+                ? zoomOverride
+                : _zoomFor(_fitMode!))
+            .clamp(.1, 8.0);
     final page = _controller.layout.pageLayouts[_pageIndex];
     final saved = _savedView;
     final Offset center;
-    if (!_preferInitialLocator &&
+    if (alignBottom) {
+      center = Offset(
+        _spread.center.dx,
+        _spread.bottom - _controller.viewSize.height / (2 * scale),
+      );
+    } else if (!_preferInitialLocator &&
         saved != null &&
         saved.pageIndex == _pageIndex &&
         (restoreLocation || _fitMode != PdfFitMode.page)) {
@@ -546,7 +657,7 @@ final class _PdfrxFacade extends PdfReaderTools
     }
   }
 
-  void _turnSpread(int direction) {
+  Future<void> _turnSpread(int direction, {bool fromWheel = false}) async {
     final config = _configuration;
     if (_disposed || _restoring || config == null || !_controller.isReady) {
       return;
@@ -554,13 +665,45 @@ final class _PdfrxFacade extends PdfReaderTools
     final step = config.facingPages ? 2 : 1;
     final target = (_pageIndex ~/ step) * step + direction * step;
     if (target < 0 || target >= pageCount) return;
-    unawaited(
-      showPage(target, 0).then((_) {
-        if (_disposed) return;
-        config.onPositionChanged?.call(target, 0);
-        if (config.onPositionChanged == null) config.onPageChanged(target);
-      }),
+    await _controller.textSelectionDelegate.clearTextSelection();
+    final alignBottom = fromWheel && direction < 0 && !_atFit;
+    await _showPage(target, 0, alignBottom: alignBottom);
+    if (_disposed) return;
+    final page = _controller.layout.pageLayouts[target];
+    final offset = alignBottom
+        ? ((_controller.visibleRect.top - page.top) / page.height).clamp(
+            0.0,
+            1.0,
+          )
+        : 0.0;
+    config.onPositionChanged?.call(target, offset);
+    if (config.onPositionChanged == null) config.onPageChanged(target);
+  }
+
+  Future<void> _prepareSpread(
+    _PdfSpread spread,
+    int firstPage,
+    Size size,
+  ) async {
+    final controller = spread.controller;
+    final rect = pdfSpreadRect(
+      controller.layout,
+      firstPage,
+      _configuration!.facingPages,
     );
+    final scale = switch (_fitMode) {
+      PdfFitMode.custom => zoom,
+      PdfFitMode.width => size.width / rect.width,
+      _ => min(size.width / rect.width, size.height / rect.height),
+    };
+    final center = _fitMode == PdfFitMode.page
+        ? rect.center
+        : Offset(rect.center.dx, rect.top + size.height / (2 * scale));
+    final matrix = controller.calcMatrixFor(center, zoom: scale);
+
+    if (controller.value != matrix) {
+      await controller.goTo(matrix, duration: Duration.zero);
+    }
   }
 
   Future<void> _saveSelection(
@@ -625,223 +768,476 @@ final class _PdfrxFacade extends PdfReaderTools
           : PdfFitMode.width;
     }
     _configuration = configuration;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final size = Size(constraints.maxWidth, constraints.maxHeight);
-        final key = (configuration.layoutMode, configuration.facingPages, size);
-        if (_viewKey != key) {
-          _viewKey = key;
-          _viewerRevision++;
-          _restoring = true;
-          final revision = _viewerRevision;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!_disposed && _restoring && revision == _viewerRevision) {
-              _configuration?.onContentReadyChanged?.call(false);
+    return ListenableBuilder(
+      listenable: this,
+      builder: (context, _) => LayoutBuilder(
+        builder: (context, constraints) {
+          final size = Size(constraints.maxWidth, constraints.maxHeight);
+          final key = (
+            configuration.layoutMode,
+            configuration.facingPages,
+            size,
+          );
+          if (_viewKey != key) {
+            _viewKey = key;
+            _pageLayout = null;
+            for (final spread in _spreads.values) {
+              spread.finish();
             }
-          });
-        }
-        final revision = _viewerRevision;
-        return applyPdfBrightness(
-          preserveColors ? Brightness.light : configuration.brightness,
-          Listener(
-            onPointerSignal: (event) {
-              if (configuration.layoutMode != ReaderLayoutMode.paginated ||
-                  event is! PointerScrollEvent ||
-                  _restoring ||
-                  !_atFit ||
-                  HardwareKeyboard.instance.isControlPressed ||
-                  HardwareKeyboard.instance.isMetaPressed) {
-                return;
+            _spreads.clear();
+            final previous = _pagesController;
+            _pagesController =
+                configuration.layoutMode == ReaderLayoutMode.paginated
+                ? PageController(
+                    initialPage: _pageIndex ~/ _spreadStep,
+                    keepPage: false,
+                  )
+                : null;
+            WidgetsBinding.instance.addPostFrameCallback(
+              (_) => previous?.dispose(),
+            );
+            _viewerRevision++;
+            _restoring = true;
+            final revision = _viewerRevision;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!_disposed && _restoring && revision == _viewerRevision) {
+                _configuration?.onContentReadyChanged?.call(false);
               }
-              final delta =
-                  event.scrollDelta.dy.abs() >= event.scrollDelta.dx.abs()
-                  ? event.scrollDelta.dy
-                  : event.scrollDelta.dx;
-              if (delta.abs() < 10) return;
-              final now = DateTime.now();
-              if (_lastWheelTurn != null &&
-                  now.difference(_lastWheelTurn!).inMilliseconds < 250) {
-                return;
-              }
-              _lastWheelTurn = now;
-              // Let pdfrx finish handling the wheel before snapping to the next row.
+            });
+          }
+          final revision = _viewerRevision;
+          _pageSwipeEnabled =
+              configuration.layoutMode == ReaderLayoutMode.paginated &&
+              !_restoring &&
+              !_textSelected &&
+              !_multiTouch;
+          _pagingEnabled =
+              _pageSwipeEnabled &&
+              configuration.pageTurnAnimation &&
+              !MediaQuery.disableAnimationsOf(context);
+          Widget buildViewer(int index) {
+            final spread = _spreadFor(index);
+            final controller = spread.controller;
+            final paginated =
+                configuration.layoutMode == ReaderLayoutMode.paginated;
+            final firstPage = paginated ? index * _spreadStep : _pageIndex;
+            bool active() => identical(spread, _activeSpread);
+
+            if (!active() && spread.ready.isCompleted) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (!_disposed && revision == _viewerRevision) {
-                  final turn = ReaderInteractionScope.maybeOf(context)?.onTurn;
-                  if (turn != null) {
-                    turn(delta > 0 ? 1 : -1);
-                  } else {
-                    _turnSpread(delta > 0 ? 1 : -1);
-                  }
+                if (!_disposed &&
+                    revision == _viewerRevision &&
+                    identical(_spreads[index], spread) &&
+                    !active()) {
+                  unawaited(_prepareSpread(spread, firstPage, size));
                 }
               });
-              WidgetsBinding.instance.scheduleFrame();
-            },
-            onPointerDown: (event) {
-              _swipe.start(event);
-              _startLinkTap(event);
-            },
-            onPointerMove: (event) {
-              _swipe.update(event);
-              _moveLinkTap(event);
-            },
-            onPointerCancel: (event) {
-              _swipe.cancel(event);
-              _cancelLinkTap(event);
-            },
-            onPointerUp: (event) {
-              _endLinkTap(event);
-              final offset = _swipe.end(event);
+            }
 
-              if (configuration.layoutMode == ReaderLayoutMode.paginated &&
-                  offset != null &&
-                  !_restoring &&
-                  _atFit &&
-                  offset.dx.abs() > 70 &&
-                  offset.dx.abs() > offset.dy.abs()) {
-                final direction = offset.dx < 0 ? 1 : -1;
-                final turn = ReaderInteractionScope.maybeOf(context)?.onTurn;
-
-                if (turn != null) {
-                  turn(direction);
-                } else {
-                  _turnSpread(direction);
-                }
-              }
-            },
-            child: ReaderHighlightInteraction(
-              isSelecting: () => _textSelected,
-              hitTest: (position) {
-                if (!_controller.isReady) return null;
-                final documentPosition = _controller.globalToDocument(position);
-                if (documentPosition == null) return null;
-                final target = pdfHighlightAt(
-                  documentPosition,
-                  _controller.layout.pageLayouts,
-                  ReaderInteractionScope.maybeOf(context)?.highlights ??
-                      const [],
-                );
-                if (target == null) return null;
-                final visible = target.bounds.intersect(
-                  _controller.visibleRect,
-                );
-                final topLeft = _controller.documentToGlobal(visible.topLeft);
-                final bottomRight = _controller.documentToGlobal(
-                  visible.bottomRight,
-                );
-                if (visible.isEmpty || topLeft == null || bottomRight == null) {
-                  return null;
-                }
-                return (
-                  highlight: target.highlight,
-                  bounds: Rect.fromPoints(topLeft, bottomRight),
-                );
+            final viewer = Listener(
+              onPointerDown: (event) {
+                _swipe.start(event);
+                _startLinkTap(event);
               },
-              child: PdfSelectionToolbar(
-                controller: _controller,
-                saveSelection: _saveSelection,
-                child: PdfViewer(
-                  _documentRef,
-                  key: ValueKey(key),
-                  controller: _controller,
-                  initialPageNumber: _pageIndex + 1,
-                  params: buildPdfViewerParams(
-                    configuration,
-                    viewportSize: size,
-                    viewerController: _controller,
-                    searchPainter: _searcher.pageTextMatchPaintCallback,
-                    viewerOverlayBuilder: (_, _, handleLinkTap) {
-                      _handleLinkTap = handleLinkTap;
-                      return const [];
-                    },
-                    onGeneralTap: (_, _, _) {
-                      final handled = _linkTapHandled;
-                      _linkTapHandled = false;
-                      return handled;
-                    },
-                    onLink: (link) {
-                      // Consume the later classified tap after an immediate jump.
-                      if (_linkTapHandled) {
-                        _linkTapHandled = false;
-                        return;
-                      }
+              onPointerMove: (event) {
+                _swipe.update(event);
+                _moveLinkTap(event);
+              },
+              onPointerCancel: (event) {
+                _swipe.cancel(event);
+                _instantMouseDrag = null;
+                _pageDrag?.cancel();
+                _pageDrag = null;
+                _pagesController?.jumpToPage(_pageIndex ~/ _spreadStep);
+                _cancelLinkTap(event);
+              },
+              onPointerUp: (event) {
+                _endLinkTap(event);
+                final offset = _swipe.end(event);
 
-                      ReaderInteractionScope.maybeOf(context)?.suppressTap();
-                      unawaited(
-                        _openLink(link).catchError((Object error) {
-                          if (context.mounted) {
-                            ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                              const SnackBar(
-                                content: Text('Could not open this link.'),
+                if (configuration.layoutMode == ReaderLayoutMode.paginated &&
+                    (!configuration.pageTurnAnimation ||
+                        MediaQuery.disableAnimationsOf(context)) &&
+                    offset != null &&
+                    !_restoring &&
+                    _atFit &&
+                    offset.dx.abs() > 70 &&
+                    offset.dx.abs() > offset.dy.abs()) {
+                  final direction = offset.dx < 0 ? 1 : -1;
+                  final turn = ReaderInteractionScope.maybeOf(context)?.onTurn;
+
+                  if (turn != null) {
+                    turn(direction);
+                  } else {
+                    _turnSpread(direction);
+                  }
+                }
+              },
+              child: ReaderHighlightInteraction(
+                isSelecting: () => _textSelected,
+                hitTest: (position) {
+                  if (!controller.isReady) return null;
+                  final documentPosition = controller.globalToDocument(
+                    position,
+                  );
+                  if (documentPosition == null) return null;
+                  final target = pdfHighlightAt(
+                    documentPosition,
+                    controller.layout.pageLayouts,
+                    ReaderInteractionScope.maybeOf(context)?.highlights ??
+                        const [],
+                  );
+                  if (target == null) return null;
+                  final visible = target.bounds.intersect(
+                    controller.visibleRect,
+                  );
+                  final topLeft = controller.documentToGlobal(visible.topLeft);
+                  final bottomRight = controller.documentToGlobal(
+                    visible.bottomRight,
+                  );
+                  if (visible.isEmpty ||
+                      topLeft == null ||
+                      bottomRight == null) {
+                    return null;
+                  }
+                  return (
+                    highlight: target.highlight,
+                    bounds: Rect.fromPoints(topLeft, bottomRight),
+                  );
+                },
+                child: PdfSelectionToolbar(
+                  controller: controller,
+                  saveSelection: _saveSelection,
+                  child: PdfViewer(
+                    _documentRef,
+                    key: ValueKey((revision, index)),
+                    controller: controller,
+                    initialPageNumber: firstPage + 1,
+                    params: buildPdfViewerParams(
+                      configuration,
+                      viewportSize: size,
+                      layoutPages: paginated
+                          ? (pages, params) =>
+                                _pageLayout ??= buildPaginatedPdfLayout(
+                                  [
+                                    for (final page in pages)
+                                      Size(page.width, page.height),
+                                  ],
+                                  viewportSize: size,
+                                  facingPages: configuration.facingPages,
+                                  margin: params.margin,
+                                )
+                          : null,
+                      panX: () =>
+                          active() && !_applyingView ? _mousePanX : null,
+                      onInteractionStart: _startPageDrag,
+                      onInteractionUpdate: _updatePageDrag,
+                      onInteractionEnd: _endPageDrag,
+                      viewerController: controller,
+                      searchPainter: _searcher.pageTextMatchPaintCallback,
+                      viewerOverlayBuilder: (_, _, handleLinkTap) {
+                        spread.handleLinkTap = handleLinkTap;
+                        return const [];
+                      },
+                      onGeneralTap: (_, _, _) {
+                        final handled = _linkTapHandled;
+                        _linkTapHandled = false;
+                        return handled;
+                      },
+                      onLink: (link) {
+                        // Consume the later classified tap after an immediate jump.
+                        if (_linkTapHandled) {
+                          _linkTapHandled = false;
+                          return;
+                        }
+
+                        ReaderInteractionScope.maybeOf(context)?.suppressTap();
+                        unawaited(
+                          _openLink(link).catchError((Object error) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                                const SnackBar(
+                                  content: Text('Could not open this link.'),
+                                ),
+                              );
+                            }
+                          }),
+                        );
+                      },
+                      customizeContextMenuItems: (params, items) {
+                        if (!params.textSelectionDelegate.hasSelectedText ||
+                            !params.textSelectionDelegate.isCopyAllowed) {
+                          return;
+                        }
+
+                        final interactions = ReaderInteractionScope.maybeOf(
+                          context,
+                        );
+
+                        for (final entry in [
+                          ('Annotate', interactions?.onAnnotate),
+                          ('Add note', interactions?.onNote),
+                        ]) {
+                          final action = entry.$2;
+
+                          if (action != null) {
+                            items.add(
+                              ContextMenuButtonItem(
+                                label: entry.$1,
+                                onPressed: () {
+                                  params.dismissContextMenu();
+                                  _saveSelection(
+                                    params.textSelectionDelegate,
+                                    action,
+                                  );
+                                },
                               ),
                             );
                           }
-                        }),
-                      );
-                    },
-                    customizeContextMenuItems: (params, items) {
-                      if (!params.textSelectionDelegate.hasSelectedText ||
-                          !params.textSelectionDelegate.isCopyAllowed) {
-                        return;
-                      }
-
-                      final interactions = ReaderInteractionScope.maybeOf(
-                        context,
-                      );
-
-                      for (final entry in [
-                        ('Annotate', interactions?.onAnnotate),
-                        ('Add note', interactions?.onNote),
-                      ]) {
-                        final action = entry.$2;
-
-                        if (action != null) {
-                          items.add(
-                            ContextMenuButtonItem(
-                              label: entry.$1,
-                              onPressed: () {
-                                params.dismissContextMenu();
-                                _saveSelection(
-                                  params.textSelectionDelegate,
-                                  action,
-                                );
-                              },
-                            ),
-                          );
                         }
-                      }
-                    },
-                    highlights:
-                        ReaderInteractionScope.maybeOf(context)?.highlights ??
-                        const [],
-                    onTextSelectionChange: (selection) {
-                      _textSelected = selection.hasSelectedText;
-                      _swipe.selectionChanged(selection.hasSelectedText);
-                      ReaderInteractionScope.maybeOf(
-                        context,
-                      )?.onSelectionChanged(selection.hasSelectedText);
-                    },
-                    currentPageIndex: () => _pageIndex,
-                    onViewerReady: (_, _) async {
-                      if (_disposed || revision != _viewerRevision) return;
-                      try {
-                        await _restorePage();
-                      } finally {
-                        if (!_disposed && revision == _viewerRevision) {
-                          _restoring = false;
-                          _positionChanged();
+                      },
+                      highlights:
+                          ReaderInteractionScope.maybeOf(context)?.highlights ??
+                          const [],
+                      onTextSelectionChange: (selection) {
+                        if (!active()) return;
+                        _textSelected = selection.hasSelectedText;
+                        _swipe.selectionChanged(selection.hasSelectedText);
+                        ReaderInteractionScope.maybeOf(
+                          context,
+                        )?.onSelectionChanged(selection.hasSelectedText);
+                      },
+                      currentPageIndex: () =>
+                          paginated ? firstPage : _pageIndex,
+                      onViewerReady: (_, _) async {
+                        if (_disposed || revision != _viewerRevision) return;
+                        _documentEvents ??= controller.document.events.listen((
+                          event,
+                        ) {
+                          if (event is PdfDocumentPageStatusChangedEvent) {
+                            _pageLayout = null;
+                          }
+                        });
+                        if (active()) {
+                          try {
+                            await _restorePage();
+                          } finally {
+                            if (!_disposed && revision == _viewerRevision) {
+                              _restoring = false;
+                              spread.finish();
+                              _positionChanged();
+                            }
+                          }
+                        } else {
+                          await _prepareSpread(spread, firstPage, size);
+                          spread.finish();
                         }
-                      }
-                    },
-                    onPageChanged: (_) => _positionChanged(),
+                      },
+                      onPageChanged: (_) {
+                        if (active()) _positionChanged();
+                      },
+                    ),
                   ),
                 ),
               ),
+            );
+            return _PdfSpreadLifetime(
+              key: ValueKey((revision, index)),
+              keepAlive: active(),
+              onDispose: () {
+                spread.finish();
+                if (identical(_spreads[index], spread)) _spreads.remove(index);
+              },
+              child: IgnorePointer(ignoring: !active(), child: viewer),
+            );
+          }
+
+          final pages = _pagesController;
+          return ReaderPageWheel(
+            canTurn: _canTurnWithWheel,
+            onTurn: (direction) => _turnSpread(direction, fromWheel: true),
+            child: applyPdfBrightness(
+              preserveColors ? Brightness.light : configuration.brightness,
+              pages == null
+                  ? buildViewer(0)
+                  : Listener(
+                      onPointerDown: _pagePointerDown,
+                      onPointerSignal: (_) => _mousePanX = null,
+                      onPointerUp: _pagePointerEnded,
+                      onPointerCancel: _pagePointerEnded,
+                      child: NotificationListener<ScrollEndNotification>(
+                        onNotification: (notification) {
+                          if (notification.depth == 0) {
+                            scheduleMicrotask(_settlePage);
+                          }
+                          return false;
+                        },
+                        child: ScrollConfiguration(
+                          behavior: ScrollConfiguration.of(context).copyWith(
+                            dragDevices: {
+                              if (!_restoring && _atFit)
+                                ...ScrollConfiguration.of(context).dragDevices,
+                            }..remove(PointerDeviceKind.mouse),
+                          ),
+                          // Inactive incoming viewers ignore pointers. Keep their
+                          // mouse drags on the same guarded release path as EPUB.
+                          child: ReaderMousePageDrag(
+                            controller: pages,
+                            animate: _pagingEnabled,
+                            canStart: (_) => _pageSwipeEnabled,
+                            onTurn: (direction) => _turnSpread(direction),
+                            child: PageView.builder(
+                              key: ValueKey(pages),
+                              controller: pages,
+                              allowImplicitScrolling: true,
+                              physics: _pagingEnabled
+                                  ? const ClampingScrollPhysics()
+                                  : const NeverScrollableScrollPhysics(),
+                              itemCount: (pageCount / _spreadStep).ceil(),
+                              itemBuilder: (context, index) => SizedBox.expand(
+                                key: ValueKey(('pdf-spread', index)),
+                                child: _PdfSpreadLoader(
+                                  pages: pages,
+                                  index: index,
+                                  builder: (_) => buildViewer(index),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
+  }
+
+  void _pagePointerDown(PointerDownEvent event) {
+    _pagePointers.add(event.pointer);
+    if (_pagePointers.length == 1) {
+      _instantMouseDrag = null;
+      _pagePointerStart = event;
+      _mousePanX = null;
+    }
+    if (_pagePointers.length > 1 && !_multiTouch) {
+      _multiTouch = true;
+      _instantMouseDrag = null;
+      _pageDrag?.cancel();
+      _pageDrag = null;
+      _pagesController?.jumpToPage(_pageIndex ~/ _spreadStep);
+      notifyListeners();
+    }
+  }
+
+  void _pagePointerEnded(PointerEvent event) {
+    _pagePointers.remove(event.pointer);
+    if (_pagePointers.isEmpty && _multiTouch) {
+      _multiTouch = false;
+      notifyListeners();
+    }
+    // A mouse press can outlast the ballistic turn. ScrollEnd then runs while
+    // the pointer is down, so release must retry committing the visible page.
+    if (_pagePointers.isEmpty) scheduleMicrotask(_settlePage);
+  }
+
+  void _startPageDrag(ScaleStartDetails details) {
+    _lastPageDragDelta = 0;
+    final start = _pagePointerStart;
+    final mouse =
+        details.pointerCount == 1 && start?.kind == PointerDeviceKind.mouse;
+    _mousePanX = null;
+    final pages = _pagesController;
+    if (!_pageSwipeEnabled ||
+        pages == null ||
+        !pages.hasClients ||
+        details.pointerCount != 1) {
+      return;
+    }
+    // The page controller owns horizontal mouse motion, including its fling.
+    // Keep the zoomed document still inside its moving page slot.
+    _mousePanX = mouse ? _controller.visibleRect.center.dx : null;
+    if (!_atFit) {
+      if (!mouse) return;
+      final delta = details.focalPoint - start!.position;
+      if (delta.dx.abs() <= delta.dy.abs()) return;
+    }
+    if (!_pagingEnabled) {
+      if (mouse) _instantMouseDrag = details.focalPoint - start!.position;
+      return;
+    }
+    _pageDrag = pages.position.drag(
+      DragStartDetails(globalPosition: details.focalPoint),
+      () => _pageDrag = null,
+    );
+  }
+
+  void _updatePageDrag(ScaleUpdateDetails details) {
+    if (_instantMouseDrag != null) {
+      _instantMouseDrag =
+          details.pointerCount == 1 && (details.scale - 1).abs() <= .001
+          ? _instantMouseDrag! + details.focalPointDelta
+          : null;
+    }
+    final drag = _pageDrag;
+    if (drag == null) return;
+    if (details.pointerCount != 1 || (details.scale - 1).abs() > .001) {
+      drag.cancel();
+      _pageDrag = null;
+      _pagesController?.jumpToPage(_pageIndex ~/ _spreadStep);
+      return;
+    }
+    final delta = details.focalPointDelta.dx;
+    if (delta != 0) _lastPageDragDelta = delta;
+    drag.update(
+      DragUpdateDetails(
+        globalPosition: details.focalPoint,
+        delta: Offset(details.focalPointDelta.dx, 0),
+        primaryDelta: details.focalPointDelta.dx,
+      ),
+    );
+  }
+
+  void _endPageDrag(ScaleEndDetails details) {
+    final instant = _instantMouseDrag;
+    _instantMouseDrag = null;
+    if (instant != null &&
+        instant.dx.abs() > 70 &&
+        instant.dx.abs() > instant.dy.abs()) {
+      unawaited(_turnSpread(instant.dx < 0 ? 1 : -1));
+    }
+    final drag = _pageDrag;
+    _pageDrag = null;
+    // Decelerating pointer samples can produce an estimated velocity opposite
+    // to the final movement. Do not let that fling the page backwards.
+    final estimate = details.velocity.pixelsPerSecond.dx;
+    final velocity = estimate * _lastPageDragDelta < 0 ? 0.0 : estimate;
+    drag?.end(
+      DragEndDetails(
+        velocity: Velocity(pixelsPerSecond: Offset(velocity, 0)),
+        primaryVelocity: velocity,
+      ),
+    );
+  }
+
+  void _settlePage() {
+    final pages = _pagesController;
+    if (_disposed ||
+        _restoring ||
+        _pagePointers.isNotEmpty ||
+        pages == null ||
+        !pages.hasClients ||
+        pages.position.isScrollingNotifier.value) {
+      return;
+    }
+    final page = pages.page!;
+    // A new touch ends the ballistic activity before its next drag starts.
+    // That pause is not a completed turn and must never snap the held page.
+    if ((page - page.round()).abs() > .000001) return;
+    final target = page.round() * _spreadStep;
+    if (target == (_pageIndex ~/ _spreadStep) * _spreadStep) return;
+    unawaited(showPage(target, 0));
   }
 
   int _centerPageIndex() {
@@ -908,8 +1304,13 @@ final class _PdfrxFacade extends PdfReaderTools
     _saveTimer?.cancel();
     if (_savedView != null) onViewChanged?.call(_savedView!);
     _disposed = true;
+    _pageDrag?.cancel();
+    _pagesController?.dispose();
     _searcher.dispose();
-    _controller.removeListener(_positionChanged);
+    _documentEvents?.cancel();
+    for (final spread in _spreads.values) {
+      spread.finish();
+    }
     _releaseDocument?.call();
     _configuration = null;
     super.dispose();
@@ -960,6 +1361,133 @@ ReaderHighlightTarget? pdfHighlightAt(
   return null;
 }
 
+final class _PdfSpread {
+  final controller = PdfViewerController();
+  final ready = Completer<void>();
+  PdfViewerHandleLinkTap? handleLinkTap;
+
+  void finish() {
+    if (!ready.isCompleted) ready.complete();
+  }
+}
+
+// Search results belong to the document, while navigation follows the active spread.
+final class _PdfSearchSession extends PdfTextSearchSession {
+  _PdfSearchSession(this.activeController) : super(PdfViewerController());
+  final PdfViewerController Function() activeController;
+
+  @override
+  PdfViewerController? get controller {
+    final current = activeController();
+    return current.isReady ? current : null;
+  }
+}
+
+final class _PdfSpreadLifetime extends StatefulWidget {
+  const _PdfSpreadLifetime({
+    super.key,
+    required this.child,
+    required this.onDispose,
+    required this.keepAlive,
+  });
+  final Widget child;
+  final VoidCallback onDispose;
+  final bool keepAlive;
+
+  @override
+  State<_PdfSpreadLifetime> createState() => _PdfSpreadLifetimeState();
+}
+
+final class _PdfSpreadLifetimeState extends State<_PdfSpreadLifetime>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => widget.keepAlive;
+
+  @override
+  void didUpdateWidget(_PdfSpreadLifetime oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.keepAlive != widget.keepAlive) {
+      updateKeepAlive();
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.onDispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
+  }
+}
+
+/// Warm nearby viewers while stationary. Building a new PDF viewer for an
+/// off-screen cache slot during a turn competes with the browser's animation.
+final class _PdfSpreadLoader extends StatefulWidget {
+  const _PdfSpreadLoader({
+    required this.pages,
+    required this.index,
+    required this.builder,
+  });
+
+  final PageController pages;
+  final int index;
+  final WidgetBuilder builder;
+
+  @override
+  State<_PdfSpreadLoader> createState() => _PdfSpreadLoaderState();
+}
+
+final class _PdfSpreadLoaderState extends State<_PdfSpreadLoader> {
+  bool _loaded = false;
+  late final _scrolling = widget.pages.position.isScrollingNotifier;
+
+  bool get _shouldLoad {
+    final page = widget.pages.page ?? widget.pages.initialPage.toDouble();
+    final visible = (widget.index - page).abs() < 1;
+    final settled = !_scrolling.value && (page - page.round()).abs() < .000001;
+    return visible || settled;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    widget.pages.addListener(_changed);
+    _scrolling.addListener(_changed);
+  }
+
+  void _changed() {
+    if (!_loaded && _shouldLoad) {
+      setState(() => _loaded = true);
+      _stopListening();
+    }
+  }
+
+  void _stopListening() {
+    widget.pages.removeListener(_changed);
+    _scrolling.removeListener(_changed);
+  }
+
+  @override
+  void dispose() {
+    _stopListening();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_loaded && _shouldLoad) {
+      _loaded = true;
+      _stopListening();
+    }
+
+    return _loaded ? widget.builder(context) : const SizedBox.expand();
+  }
+}
+
 PdfViewerParams buildPdfViewerParams(
   PdfViewportConfiguration configuration, {
   PdfViewerController? viewerController,
@@ -967,6 +1495,7 @@ PdfViewerParams buildPdfViewerParams(
   PdfViewerTextSelectionChangeCallback? onTextSelectionChange,
   ValueChanged<int>? onPageChanged,
   Size viewportSize = const Size(800, 600),
+  PdfPageLayoutFunction? layoutPages,
   int Function()? currentPageIndex,
   PdfViewerContextMenuUpdateMenuItemsFunction? customizeContextMenuItems,
   List<ReaderHighlight> highlights = const [],
@@ -974,11 +1503,26 @@ PdfViewerParams buildPdfViewerParams(
   ValueChanged<PdfLink>? onLink,
   PdfViewerOverlaysBuilder? viewerOverlayBuilder,
   PdfViewerGeneralTapHandler? onGeneralTap,
+  double? Function()? panX,
+  GestureScaleStartCallback? onInteractionStart,
+  GestureScaleUpdateCallback? onInteractionUpdate,
+  GestureScaleEndCallback? onInteractionEnd,
 }) {
   final paginated = configuration.layoutMode == ReaderLayoutMode.paginated;
   final handles = PdfSelectionHandles(viewerController);
   return PdfViewerParams(
     pageDropShadow: null,
+    // Round screen resolution up to stable buckets so fitting a new spread
+    // doesn't immediately replace its image. Keep pdfrx's cap for zoomed tiles.
+    getPageRenderingScale: (context, page, controller, estimatedScale) {
+      final scale =
+          controller.currentZoom * MediaQuery.devicePixelRatioOf(context);
+      final imageScale = pow(2, (log(scale) / ln2).ceil()).toDouble();
+      return min(estimatedScale, imageScale);
+    },
+    onInteractionStart: onInteractionStart,
+    onInteractionUpdate: onInteractionUpdate,
+    onInteractionEnd: onInteractionEnd,
     viewerOverlayBuilder: viewerOverlayBuilder,
     onGeneralTap: onGeneralTap,
     customizeContextMenuItems: customizeContextMenuItems,
@@ -1058,16 +1602,18 @@ PdfViewerParams buildPdfViewerParams(
     // The layout's outer margin separates pages vertically, but must not add
     // horizontal travel beyond the document edges when fitting its width.
     boundaryMargin: const EdgeInsets.symmetric(horizontal: -8),
-    layoutPages: paginated
-        ? (pages, params) => buildPaginatedPdfLayout(
-            [for (final page in pages) Size(page.width, page.height)],
-            viewportSize: viewportSize,
-            facingPages: configuration.facingPages,
-            margin: params.margin,
-          )
-        : configuration.facingPages
-        ? _facingLayout
-        : null,
+    layoutPages:
+        layoutPages ??
+        (paginated
+            ? (pages, params) => buildPaginatedPdfLayout(
+                [for (final page in pages) Size(page.width, page.height)],
+                viewportSize: viewportSize,
+                facingPages: configuration.facingPages,
+                margin: params.margin,
+              )
+            : configuration.facingPages
+            ? _facingLayout
+            : null),
     // Scroll physics operate on the entire document. Paginated panning is
     // bounded to the active spread instead, with discrete wheel/touch turns.
     scrollPhysics: paginated ? null : const ClampingScrollPhysics(),
@@ -1096,7 +1642,7 @@ PdfViewerParams buildPdfViewerParams(
             return controller.calcMatrixFor(
               Offset(
                 clampCenter(
-                  visible.center.dx,
+                  panX?.call() ?? visible.center.dx,
                   rect.left,
                   rect.right,
                   viewSize.width / (2 * zoom),
