@@ -614,7 +614,8 @@ void main() {
       await tester.pumpAndSettle();
 
       var pageView = tester.widget<PageView>(find.byType(PageView));
-      final pageCount = pageView.childrenDelegate.estimatedChildCount!;
+      // The trailing item is the first page of the following chapter.
+      final pageCount = pageView.childrenDelegate.estimatedChildCount! - 1;
       expect(pageView.controller, isNotNull);
       expect(
         pageView.controller!.page,

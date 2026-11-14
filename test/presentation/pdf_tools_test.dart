@@ -74,6 +74,125 @@ Future<void> _ready(WidgetTester tester, PdfReaderTools tools) async {
 }
 
 void main() {
+  for (final animation in [true, false]) {
+    for (final facing in [false, true]) {
+      testWidgets(
+        'PDF touch turns track the finger, animation $animation, facing $facing',
+        (tester) async {
+          await tester.binding.setSurfaceSize(const Size(800, 600));
+          addTearDown(() => tester.binding.setSurfaceSize(null));
+          final bytes = await tester.runAsync(_document);
+          await tester.runAsync(initializePdfiumForTest);
+          final facade = await tester.runAsync(
+            () => createPdfrxFacade(bytes!, sourceName: 'drag-pdf'),
+          );
+          final tools = facade! as PdfReaderTools;
+          addTearDown(() => (facade as DisposablePdfFacade).dispose());
+          var page = 0;
+          await tester.pumpWidget(
+            MaterialApp(
+              home: facade.buildViewport(
+                PdfViewportConfiguration(
+                  pageIndex: 0,
+                  facingPages: facing,
+                  pageTurnAnimation: animation,
+                  backgroundColor: Colors.white,
+                  brightness: Brightness.light,
+                  layoutMode: ReaderLayoutMode.paginated,
+                  onPageChanged: (value) => page = value,
+                ),
+              ),
+            ),
+          );
+          await _ready(tester, tools);
+          await tester.pumpAndSettle();
+          final viewport = find.byType(PageView);
+          final bounds = tester.getRect(viewport);
+          Finder spread(int index) =>
+              find.byKey(ValueKey(('pdf-spread', index)));
+          for (final direction in [1, -1]) {
+            final oldPage = page;
+            final outgoing = spread(direction > 0 ? 0 : 1);
+            final incoming = spread(direction > 0 ? 1 : 0);
+            final gesture = await tester.startGesture(bounds.center);
+            await gesture.moveBy(Offset(-30.0 * direction, 0));
+            await tester.pump();
+            for (final distance in [80.0, 90.0, 70.0]) {
+              final oldLeft = tester.getTopLeft(outgoing).dx;
+              await gesture.moveBy(Offset(-distance * direction, 0));
+              await tester.pump(const Duration(milliseconds: 16));
+              final current = tester.getRect(outgoing);
+              expect(tester.getRect(viewport), bounds);
+              if (animation) {
+                final next = tester.getRect(incoming);
+                expect(
+                  current.left,
+                  closeTo(oldLeft - distance * direction, 1),
+                );
+                expect(
+                  direction > 0 ? current.right : next.right,
+                  closeTo(direction > 0 ? next.left : current.left, .01),
+                  reason: 'PDF spreads must remain adjacent, never overlap',
+                );
+              } else {
+                expect(current, bounds);
+              }
+              expect(page, oldPage);
+            }
+            if (animation) {
+              await gesture.cancel();
+              await tester.pumpAndSettle();
+              expect(page, oldPage);
+              expect(tester.getRect(outgoing), bounds);
+              final turn = await tester.startGesture(bounds.center);
+              await turn.moveBy(Offset(-30.0 * direction, 0));
+              await tester.pump();
+              await turn.moveBy(Offset(-bounds.width * .65 * direction, 0));
+              await tester.pump(const Duration(milliseconds: 16));
+              expect(page, oldPage);
+              await turn.up();
+            } else {
+              await gesture.up();
+            }
+            await tester.pumpAndSettle();
+            expect(page, direction > 0 ? (facing ? 2 : 1) : 0);
+            expect(tester.getRect(incoming), bounds);
+          }
+          if (animation) {
+            final fittedZoom = tools.zoom;
+            final left = await tester.startGesture(
+              bounds.center - const Offset(60, 0),
+              pointer: 41,
+            );
+            final right = await tester.startGesture(
+              bounds.center + const Offset(60, 0),
+              pointer: 42,
+            );
+            await tester.pump();
+            await left.moveBy(const Offset(-30, 0));
+            await right.moveBy(const Offset(30, 0));
+            await tester.pump(const Duration(milliseconds: 30));
+            await left.moveBy(const Offset(-30, 0));
+            await right.moveBy(const Offset(30, 0));
+            await tester.pump(const Duration(milliseconds: 30));
+            expect(
+              tools.zoom,
+              greaterThan(fittedZoom),
+              reason: 'Pinching at fit size must zoom instead of paging',
+            );
+            await left.up();
+            await right.up();
+            await tester.pumpAndSettle();
+            expect(page, 0);
+          }
+
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox.shrink());
+        },
+      );
+    }
+  }
+
   for (final explicit in [false, true]) {
     testWidgets(
       explicit

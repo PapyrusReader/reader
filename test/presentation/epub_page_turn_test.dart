@@ -6,6 +6,91 @@ import '../support/in_process_epub_worker.dart';
 import '../support/synthetic_epub.dart';
 
 void main() {
+  for (final facing in [false, true]) {
+    testWidgets(
+      'chapter edges follow the finger in both directions, facing $facing',
+      (tester) async {
+        await tester.binding.setSurfaceSize(Size(facing ? 1000 : 600, 600));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final engine = testEpubEngine();
+        addTearDown(engine.dispose);
+        await engine.load(
+          ReaderDocument(
+            id: 'drag-boundaries',
+            format: ReaderFormat.epub,
+            loadBytes: () async =>
+                syntheticEpub(firstChapterBody: '<p>First page.</p>'),
+          ),
+          preferences: const ReaderPreferences(),
+        );
+        await tester.pumpWidget(
+          MaterialApp(home: Builder(builder: engine.buildViewport)),
+        );
+        await tester.pumpAndSettle();
+
+        Finder spread(int spine) =>
+            find.byKey(ValueKey(('epub-spread', spine, 0)));
+        for (final direction in [1, -1]) {
+          final viewport = find.byType(PageView);
+          final before = engine.snapshot.locator;
+          final bounds = tester.getRect(viewport);
+          final outgoing = spread(direction > 0 ? 0 : 1);
+          final incoming = spread(direction > 0 ? 1 : 0);
+          final gesture = await tester.startGesture(bounds.center);
+          await gesture.moveBy(Offset(-30.0 * direction, 0));
+          await tester.pump();
+          for (final distance in [80.0, 90.0, 70.0]) {
+            final oldLeft = tester.getTopLeft(outgoing).dx;
+            await gesture.moveBy(Offset(-distance * direction, 0));
+            await tester.pump(const Duration(milliseconds: 16));
+            final current = tester.getRect(outgoing);
+            final next = tester.getRect(incoming);
+            expect(
+              tester.getRect(viewport),
+              bounds,
+              reason: 'The viewport itself must never translate',
+            );
+            expect(current.left, closeTo(oldLeft - distance * direction, 1));
+            expect(
+              direction > 0 ? current.right : next.right,
+              closeTo(direction > 0 ? next.left : current.left, .01),
+              reason:
+                  'Adjacent pages share one edge throughout the drag, with no overlap',
+            );
+            expect(current.width, bounds.width);
+            expect(next.width, bounds.width);
+            expect(engine.snapshot.locator, before);
+          }
+          await gesture.moveBy(Offset(240.0 * direction, 0));
+          await tester.pump(const Duration(milliseconds: 16));
+          await gesture.up();
+          await tester.pumpAndSettle();
+          expect(tester.getRect(outgoing), bounds);
+          expect(engine.snapshot.locator, before);
+
+          final turn = await tester.startGesture(bounds.center);
+          await turn.moveBy(Offset(-30.0 * direction, 0));
+          await tester.pump();
+          await turn.moveBy(Offset(-bounds.width * .65 * direction, 0));
+          await tester.pump(const Duration(milliseconds: 16));
+          expect(engine.snapshot.locator, before);
+          await turn.up();
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 16));
+          expect(engine.snapshot.locator, before);
+          await tester.pumpAndSettle();
+          expect(
+            (engine.snapshot.locator as EpubReaderLocator).spineIndex,
+            direction > 0 ? 1 : 0,
+          );
+          expect(tester.getRect(incoming), bounds);
+        }
+
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
   testWidgets('instant turns do not slide on commands or touch drags', (
     tester,
   ) async {
@@ -216,7 +301,7 @@ void main() {
     );
     expect(engine.locator.spineIndex, 1);
     expect(engine.locator.textOffset, greaterThan(0));
-    expect(tester.widget<PageView>(find.byType(PageView)).controller!.page, 2);
+    expect(tester.widget<PageView>(find.byType(PageView)).controller!.page, 3);
     expect(tester.takeException(), isNull);
   });
 

@@ -431,6 +431,7 @@ final class PdfReaderEngine extends ReaderEngine {
             brightness: _preferences.brightness,
             layoutMode: _preferences.layoutMode,
             highlightLinks: _preferences.highlightLinks,
+            pageTurnAnimation: _preferences.pageTurnAnimation,
             onPageChanged: _visiblePageChanged,
             onPositionChanged: _visiblePositionChanged,
             onVisiblePagesChanged: _visiblePagesChanged,
