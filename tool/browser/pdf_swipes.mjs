@@ -1,4 +1,4 @@
-// Release-build touch regression. PAPYRUS_PDF_PAGES and PAPYRUS_PDF_CPU_RATE
+// Release-build touch and desktop mouse regressions. PAPYRUS_PDF_PAGES and PAPYRUS_PDF_CPU_RATE
 // increase the fixture size and apply Chromium CPU throttling for local profiling.
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -52,62 +52,116 @@ function fixture(pageCount) {
 }
 
 try {
-  const page = await browser.newPage({ viewport: { width: 800, height: 700 }, hasTouch: true });
-  page.setDefaultTimeout(15000);
-  const errors = [];
-  page.on('pageerror', error => errors.push(error.message));
-  await page.goto(`http://127.0.0.1:${server.address().port}`);
-  await page.locator('flt-semantics-placeholder').evaluate(element => element.click());
-  const book = resolve(temp, 'swipes.pdf');
-  await writeFile(book, fixture(Number(process.env.PAPYRUS_PDF_PAGES ?? 40)));
-  const chooser = page.waitForEvent('filechooser');
-  await page.getByRole('button', { name: 'Open a book', exact: true }).click();
-  await (await chooser).setFiles(book);
-  await page.getByText('Swipe page 1.', { exact: true }).waitFor();
-  await page.waitForTimeout(1500);
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send('Emulation.setCPUThrottlingRate', { rate: Number(process.env.PAPYRUS_PDF_CPU_RATE ?? 1) });
-  const swipe = async (direction = 1) => {
-    const x = direction > 0 ? 720 : 80;
-    const point = offset => [{ x: x - direction * offset, y: 350, id: 1 }];
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: point(0) });
-    for (let step = 1; step <= 18; step++) {
-      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: point(step * 35) });
-      await page.waitForTimeout(12);
-    }
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-  };
-  await page.evaluate(() => {
-    window.swipeMetrics = { gaps: [], tasks: [] };
-    let last;
-    const tick = now => {
-      if (last !== undefined) window.swipeMetrics.gaps.push(now - last);
-      last = now;
-      window.swipeFrame = requestAnimationFrame(tick);
+  for (const input of ['touch', 'mouse']) {
+    const width = input === 'mouse' ? 1440 : 800;
+    const page = await browser.newPage({ viewport: { width, height: 900 }, hasTouch: input === 'touch' });
+    page.setDefaultTimeout(15000);
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto(`http://127.0.0.1:${server.address().port}`);
+    await page.locator('flt-semantics-placeholder').evaluate(element => element.click());
+    const book = resolve(temp, 'swipes.pdf');
+    await writeFile(book, fixture(Number(process.env.PAPYRUS_PDF_PAGES ?? 40)));
+    const chooser = page.waitForEvent('filechooser');
+    await page.getByRole('button', { name: 'Open a book', exact: true }).click();
+    await (await chooser).setFiles(book);
+    await page.getByText('Swipe page 1.', { exact: true }).waitFor();
+    await page.waitForTimeout(1500);
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: Number(process.env.PAPYRUS_PDF_CPU_RATE ?? 1) });
+    const swipe = async (direction = 1) => {
+      const x = direction > 0 ? width * .97 : width * .03;
+      const point = offset => [{ x: x - direction * offset, y: 350, id: 1 }];
+      if (input === 'mouse') {
+        await page.mouse.move(x, 350);
+        await page.mouse.down();
+      } else {
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: point(0) });
+      }
+      for (let step = 1; step <= 18; step++) {
+        const offset = step * width * .94 / 18;
+        if (input === 'mouse') {
+          await page.mouse.move(x - direction * offset, 350);
+        } else {
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: point(offset) });
+        }
+        await page.waitForTimeout(12);
+      }
+      if (input === 'mouse') {
+        await page.mouse.up();
+      } else {
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      }
     };
-    window.swipeFrame = requestAnimationFrame(tick);
-    window.swipeObserver = new PerformanceObserver(list => {
-      window.swipeMetrics.tasks.push(...list.getEntries().map(entry => entry.duration));
+    await page.evaluate(() => {
+      window.swipeMetrics = { gaps: [], tasks: [] };
+      let last;
+      const tick = now => {
+        if (last !== undefined) window.swipeMetrics.gaps.push(now - last);
+        last = now;
+        window.swipeFrame = requestAnimationFrame(tick);
+      };
+      window.swipeFrame = requestAnimationFrame(tick);
+      window.swipeObserver = new PerformanceObserver(list => {
+        window.swipeMetrics.tasks.push(...list.getEntries().map(entry => entry.duration));
+      });
+      window.swipeObserver.observe({ type: 'longtask', buffered: false });
     });
-    window.swipeObserver.observe({ type: 'longtask', buffered: false });
-  });
-  for (let turn = 0; turn < 4; turn++) {
-    await swipe();
-    await page.waitForTimeout(70);
+    for (let turn = 0; turn < 4; turn++) {
+      await swipe();
+      await page.waitForTimeout(70);
+    }
+    await page.waitForTimeout(1000);
+    const metrics = await page.evaluate(() => {
+      cancelAnimationFrame(window.swipeFrame);
+      window.swipeObserver.disconnect();
+      const { gaps, tasks } = window.swipeMetrics;
+      gaps.sort((left, right) => left - right);
+      return { frames: gaps.length, p99FrameGapMs: gaps[Math.floor(gaps.length * .99)],
+        maxFrameGapMs: gaps.at(-1), framesOver50Ms: gaps.filter(gap => gap > 50).length,
+        longTaskCount: tasks.length, maxLongTaskMs: Math.max(0, ...tasks) };
+    });
+    const assertPage = async number => {
+      if (await page.getByRole('button', { name: 'Back', exact: true }).count() === 0) {
+        await page.keyboard.press('Escape');
+      }
+      try {
+        await page.getByRole('button', { name: `Page ${number} of ${Number(process.env.PAPYRUS_PDF_PAGES ?? 40)}. Go to page`, exact: true }).waitFor();
+      } catch (error) {
+        throw new Error(`Expected active PDF page ${number}:\n${await page.locator('body').ariaSnapshot()}`, { cause: error });
+      }
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
+    };
+    await assertPage(5);
+    assert.deepEqual(errors, []);
+    console.log(JSON.stringify({ input, width, ...metrics, reachedPage: 5 }));
+    if (input === 'mouse') {
+      await swipe();
+      await page.waitForTimeout(70);
+      await page.mouse.move(width * .7, 350);
+      await page.mouse.down();
+      await page.waitForTimeout(700);
+      await page.mouse.up();
+      await page.waitForTimeout(700);
+      await assertPage(6);
+      const text = await page.getByText('Swipe page 6.', { exact: true }).boundingBox();
+      assert.ok(text);
+      await page.mouse.move(text.x + 2, text.y + text.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(text.x + text.width - 2, text.y + text.height / 2, { steps: 12 });
+      await page.mouse.up();
+      await page.getByRole('button', { name: 'Copy', exact: true }).waitFor();
+      await page.mouse.click(width * .9, 450);
+      await page.waitForTimeout(400);
+      await swipe(-1);
+      await page.waitForTimeout(700);
+      await assertPage(5);
+      assert.deepEqual(errors, []);
+      console.log('PASS: desktop mouse hold, text selection, and reverse swipe');
+    }
+    await page.close();
   }
-  await page.waitForTimeout(1000);
-  const metrics = await page.evaluate(() => {
-    cancelAnimationFrame(window.swipeFrame);
-    window.swipeObserver.disconnect();
-    const { gaps, tasks } = window.swipeMetrics;
-    gaps.sort((left, right) => left - right);
-    return { frames: gaps.length, p99FrameGapMs: gaps[Math.floor(gaps.length * .99)],
-      maxFrameGapMs: gaps.at(-1), framesOver50Ms: gaps.filter(gap => gap > 50).length,
-      longTaskCount: tasks.length, maxLongTaskMs: Math.max(0, ...tasks) };
-  });
-  await page.getByText('Swipe page 5.', { exact: true }).waitFor();
-  assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ ...metrics, reachedPage: 5 }));
 } finally {
   await browser.close();
   await new Promise(resolve => server.close(resolve));

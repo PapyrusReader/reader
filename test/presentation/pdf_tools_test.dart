@@ -94,86 +94,202 @@ Future<void> _navigate(WidgetTester tester, Future<void> operation) async {
 }
 
 void main() {
-  for (final direction in [1, -1]) {
-    testWidgets(
-      'PDF swipes can catch and continue a settling turn, direction $direction',
-      (tester) async {
-        await tester.binding.setSurfaceSize(const Size(800, 600));
-        addTearDown(() => tester.binding.setSurfaceSize(null));
-        final bytes = await tester.runAsync(() => _document(pageCount: 6));
-        await tester.runAsync(initializePdfiumForTest);
-        final facade = (await tester.runAsync(
-          () => createPdfrxFacade(bytes!, sourceName: 'repeat-swipes'),
-        ))!;
-        final tools = facade as PdfReaderTools;
-        final initialPage = direction > 0 ? 0 : 5;
-        await facade.showPage(initialPage, 0);
-        addTearDown(() => (facade as DisposablePdfFacade).dispose());
-        await tester.pumpWidget(
-          MaterialApp(
-            home: facade.buildViewport(
-              PdfViewportConfiguration(
-                pageIndex: initialPage,
-                facingPages: false,
-                backgroundColor: Colors.white,
-                brightness: Brightness.light,
-                layoutMode: ReaderLayoutMode.paginated,
-                onPageChanged: (_) {},
+  for (final kind in [PointerDeviceKind.touch, PointerDeviceKind.mouse]) {
+    for (final direction in [1, -1]) {
+      testWidgets(
+        'PDF $kind swipes can catch and continue a settling turn, direction $direction',
+        (tester) async {
+          final width = kind == PointerDeviceKind.mouse ? 1440.0 : 800.0;
+          await tester.binding.setSurfaceSize(Size(width, 600));
+          addTearDown(() => tester.binding.setSurfaceSize(null));
+          final bytes = await tester.runAsync(() => _document(pageCount: 6));
+          await tester.runAsync(initializePdfiumForTest);
+          final facade = (await tester.runAsync(
+            () => createPdfrxFacade(bytes!, sourceName: 'repeat-swipes'),
+          ))!;
+          final tools = facade as PdfReaderTools;
+          final initialPage = direction > 0 ? 0 : 5;
+          await facade.showPage(initialPage, 0);
+          addTearDown(() => (facade as DisposablePdfFacade).dispose());
+          await tester.pumpWidget(
+            MaterialApp(
+              home: facade.buildViewport(
+                PdfViewportConfiguration(
+                  pageIndex: initialPage,
+                  facingPages: false,
+                  backgroundColor: Colors.white,
+                  brightness: Brightness.light,
+                  layoutMode: ReaderLayoutMode.paginated,
+                  onPageChanged: (_) {},
+                ),
               ),
             ),
-          ),
-        );
-        await _ready(tester, tools);
-        await tester.pumpAndSettle();
-        var newViewers = 0;
-        debugOnRebuildDirtyWidget = (element, builtOnce) {
-          if (!builtOnce && element.widget is PdfViewer) newViewers++;
-        };
-        addTearDown(() => debugOnRebuildDirtyWidget = null);
-        final pages = tester
-            .widget<PageView>(find.byType(PageView))
-            .controller!;
-        final first = await tester.startGesture(const Offset(400, 300));
-        await first.moveBy(Offset(-30.0 * direction, 0));
-        await tester.pump();
-        await first.moveBy(Offset(-480.0 * direction, 0));
-        await tester.pump(const Duration(milliseconds: 80));
-        expect(
-          newViewers,
-          0,
-          reason: 'Speculative viewers must not initialize during a swipe',
-        );
-        await first.up();
-        await tester.pump(const Duration(milliseconds: 60));
-        expect(pages.position.isScrollingNotifier.value, isTrue);
-        final beforeCatch = pages.position.pixels;
-        final second = await tester.startGesture(const Offset(400, 300));
-        await tester.pump(const Duration(milliseconds: 16));
-        expect(
-          pages.position.pixels,
-          closeTo(beforeCatch, 1),
-          reason: 'Touching a moving page must not snap it to an endpoint',
-        );
-        await second.moveBy(Offset(-30.0 * direction, 0));
-        await tester.pump();
-        final beforeDrag = pages.position.pixels;
-        await second.moveBy(Offset(-120.0 * direction, 0));
-        await tester.pump(const Duration(milliseconds: 16));
-        expect(pages.position.pixels, closeTo(beforeDrag + 120 * direction, 1));
-        await second.moveBy(Offset(-650.0 * direction, 0));
-        await tester.pump(const Duration(milliseconds: 80));
-        await second.up();
-        await tester.pumpAndSettle();
-        expect(tools.pageNumber, direction > 0 ? 3 : 4);
-        expect(tools.canReturn, isTrue);
-        await _navigate(tester, tools.returnToPrevious());
-        await tester.pumpAndSettle();
-        expect(tools.pageNumber, initialPage + 1);
-        expect(tester.takeException(), isNull);
-        await tester.pumpWidget(const SizedBox.shrink());
-      },
-    );
+          );
+          await _ready(tester, tools);
+          await tester.pumpAndSettle();
+          var newViewers = 0;
+          debugOnRebuildDirtyWidget = (element, builtOnce) {
+            if (!builtOnce && element.widget is PdfViewer) newViewers++;
+          };
+          addTearDown(() => debugOnRebuildDirtyWidget = null);
+          final pages = tester
+              .widget<PageView>(find.byType(PageView))
+              .controller!;
+          final first = await tester.startGesture(
+            Offset(width / 2, 300),
+            kind: kind,
+          );
+          await first.moveBy(Offset(-30.0 * direction, 0));
+          await tester.pump();
+          await first.moveBy(Offset(-width * .6 * direction, 0));
+          await tester.pump(const Duration(milliseconds: 80));
+          expect(
+            newViewers,
+            0,
+            reason: 'Speculative viewers must not initialize during a swipe',
+          );
+          await first.up();
+          await tester.pump(const Duration(milliseconds: 60));
+          expect(pages.position.isScrollingNotifier.value, isTrue);
+          final beforeCatch = pages.position.pixels;
+          final second = await tester.startGesture(
+            Offset(width / 2, 300),
+            kind: kind,
+          );
+          await tester.pump(const Duration(milliseconds: 16));
+          expect(
+            pages.position.pixels,
+            closeTo(beforeCatch, 1),
+            reason: 'Touching a moving page must not snap it to an endpoint',
+          );
+          await second.moveBy(Offset(-30.0 * direction, 0));
+          await tester.pump();
+          final beforeDrag = pages.position.pixels;
+          await second.moveBy(Offset(-120.0 * direction, 0));
+          await tester.pump(const Duration(milliseconds: 16));
+          expect(
+            pages.position.pixels,
+            closeTo(beforeDrag + 120 * direction, 1),
+          );
+          await second.moveBy(Offset(-width * .82 * direction, 0));
+          await tester.pump(const Duration(milliseconds: 80));
+          await second.up();
+          await tester.pumpAndSettle();
+          expect(tools.pageNumber, direction > 0 ? 3 : 4);
+          expect(tools.canReturn, isTrue);
+          await _navigate(tester, tools.returnToPrevious());
+          await tester.pumpAndSettle();
+          expect(tools.pageNumber, initialPage + 1);
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox.shrink());
+        },
+      );
+    }
   }
+
+  testWidgets(
+    'PDF mouse hold and release keeps navigation and selection alive',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1440, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final bytes = await tester.runAsync(() => _document());
+      await tester.runAsync(initializePdfiumForTest);
+      final facade = (await tester.runAsync(
+        () => createPdfrxFacade(bytes!, sourceName: 'mouse-hold'),
+      ))!;
+      final tools = facade as PdfReaderTools;
+      addTearDown(() => (facade as DisposablePdfFacade).dispose());
+      await tester.pumpWidget(
+        MaterialApp(
+          home: facade.buildViewport(
+            PdfViewportConfiguration(
+              pageIndex: 0,
+              facingPages: false,
+              backgroundColor: Colors.white,
+              brightness: Brightness.light,
+              layoutMode: ReaderLayoutMode.paginated,
+              onPageChanged: (_) {},
+            ),
+          ),
+        ),
+      );
+      await _ready(tester, tools);
+      await tester.pumpAndSettle();
+      final first = await tester.startGesture(
+        const Offset(1250, 450),
+        kind: PointerDeviceKind.mouse,
+      );
+      await first.moveBy(const Offset(-30, 0));
+      await tester.pump();
+      await first.moveBy(const Offset(-900, 0));
+      await tester.pump(const Duration(milliseconds: 80));
+      await first.up();
+      await tester.pump(const Duration(milliseconds: 60));
+      final held = await tester.startGesture(
+        const Offset(1000, 450),
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.pump(const Duration(seconds: 1));
+      await held.up();
+      await tester.pumpAndSettle();
+      expect(tools.pageNumber, 2);
+
+      final viewer = tester
+          .widgetList<PdfViewer>(find.byType(PdfViewer))
+          .singleWhere((viewer) => viewer.initialPageNumber == 2);
+      final controller = viewer.controller!;
+      for (
+        var attempt = 0;
+        attempt < 100 && !controller.document.pages[1].isLoaded;
+        attempt++
+      ) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      final page = controller.document.pages[1];
+      expect(page.isLoaded, isTrue);
+      final text = (await tester.runAsync(() => page.loadText()))!;
+      Offset character(int index) => controller.documentToGlobal(
+        text.charRects[index].center.toOffsetInDocument(
+          page: page,
+          pageRect: controller.layout.pageLayouts[1],
+        ),
+      )!;
+      final selection = await tester.startGesture(
+        character(0),
+        kind: PointerDeviceKind.mouse,
+      );
+      await selection.moveTo(character(12));
+      await tester.pump();
+      await selection.up();
+      await tester.pumpAndSettle();
+      expect(controller.textSelectionDelegate.hasSelectedText, isTrue);
+      expect(
+        tools.pageNumber,
+        2,
+        reason: 'Selecting text must not turn the page',
+      );
+      await tester.tapAt(
+        const Offset(1200, 450),
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.pumpAndSettle();
+      final reverse = await tester.startGesture(
+        const Offset(190, 450),
+        kind: PointerDeviceKind.mouse,
+      );
+      await reverse.moveBy(const Offset(30, 0));
+      await tester.pump();
+      await reverse.moveBy(const Offset(900, 0));
+      await reverse.up();
+      await tester.pumpAndSettle();
+      expect(tools.pageNumber, 1);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 
   for (final initialZoom in [null, .5]) {
     testWidgets('PDF page pixels survive settling at zoom $initialZoom', (

@@ -1048,20 +1048,30 @@ final class _PdfrxFacade extends PdfReaderTools
                         }
                         return false;
                       },
-                      child: PageView.builder(
-                        key: ValueKey(pages),
-                        controller: pages,
-                        allowImplicitScrolling: true,
-                        physics: _pagingEnabled
-                            ? const ClampingScrollPhysics()
-                            : const NeverScrollableScrollPhysics(),
-                        itemCount: (pageCount / _spreadStep).ceil(),
-                        itemBuilder: (context, index) => SizedBox.expand(
-                          key: ValueKey(('pdf-spread', index)),
-                          child: _PdfSpreadLoader(
-                            pages: pages,
-                            index: index,
-                            builder: (_) => buildViewer(index),
+                      child: ScrollConfiguration(
+                        behavior: ScrollConfiguration.of(context).copyWith(
+                          // The incoming viewer is inactive until settlement.
+                          // Its parent must still accept a mouse drag mid-turn.
+                          dragDevices: {
+                            ...ScrollConfiguration.of(context).dragDevices,
+                            PointerDeviceKind.mouse,
+                          },
+                        ),
+                        child: PageView.builder(
+                          key: ValueKey(pages),
+                          controller: pages,
+                          allowImplicitScrolling: true,
+                          physics: _pagingEnabled
+                              ? const ClampingScrollPhysics()
+                              : const NeverScrollableScrollPhysics(),
+                          itemCount: (pageCount / _spreadStep).ceil(),
+                          itemBuilder: (context, index) => SizedBox.expand(
+                            key: ValueKey(('pdf-spread', index)),
+                            child: _PdfSpreadLoader(
+                              pages: pages,
+                              index: index,
+                              builder: (_) => buildViewer(index),
+                            ),
                           ),
                         ),
                       ),
@@ -1090,6 +1100,9 @@ final class _PdfrxFacade extends PdfReaderTools
       _multiTouch = false;
       notifyListeners();
     }
+    // A mouse press can outlast the ballistic turn. ScrollEnd then runs while
+    // the pointer is down, so release must retry committing the visible page.
+    if (_pagePointers.isEmpty) scheduleMicrotask(_settlePage);
   }
 
   void _startPageDrag(ScaleStartDetails details) {
