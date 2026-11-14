@@ -158,10 +158,11 @@ try {
     await settle();
   };
   const appearance = async name => {
-    const chip = page.getByLabel(name, { exact: true });
-    await click(chip);
-    await chip.waitForFunction(element => ['aria-checked', 'aria-pressed', 'aria-selected']
-      .some(attribute => element.getAttribute(attribute) === 'true'));
+    await click(page.getByRole('button', { name: /Page appearance/ }));
+    const option = page.getByRole('menuitem', { name, exact: true });
+    await click(option);
+    await option.waitFor({ state: 'hidden' });
+    await page.getByRole('button', { name: new RegExp(`${name}.*Page appearance|Page appearance.*${name}`, 's') }).waitFor();
     await settle();
   };
   const select = async (current, target) => {

@@ -35,6 +35,14 @@ final class ReaderSettingsPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final capabilities = snapshot.capabilities ?? const ReaderCapabilities();
     final preferences = snapshot.preferences;
+    final appearance = switch (preferences) {
+      _ when preferences.brightness == Brightness.dark => _PageAppearance.night,
+      _ when preferences.backgroundColor == const Color(0xfff4ecd8) =>
+        _PageAppearance.sepia,
+      _ when preferences.backgroundColor == const Color(0xffffffff) =>
+        _PageAppearance.light,
+      _ => null,
+    };
 
     final content = ListView(
       controller: scrollController,
@@ -203,43 +211,33 @@ final class ReaderSettingsPanel extends StatelessWidget {
                 : null,
           ),
         ],
-        const SizedBox(height: 20),
-        Text('Page appearance', style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            _AppearancePreset(
-              label: 'Light',
-              selected:
-                  preferences.brightness == Brightness.light &&
-                  preferences.backgroundColor == const Color(0xffffffff),
-              background: const Color(0xffffffff),
-              foreground: const Color(0xff1b1b1b),
-              brightness: Brightness.light,
-              enabled: enabled,
-              onSelected: _applyAppearance,
-            ),
-            _AppearancePreset(
-              label: 'Sepia',
-              selected: preferences.backgroundColor == const Color(0xfff4ecd8),
-              background: const Color(0xfff4ecd8),
-              foreground: const Color(0xff3d3527),
-              brightness: Brightness.light,
-              enabled: enabled,
-              onSelected: _applyAppearance,
-            ),
-            _AppearancePreset(
-              label: 'Night',
-              selected: preferences.brightness == Brightness.dark,
-              background: const Color(0xff151719),
-              foreground: const Color(0xffece7de),
-              brightness: Brightness.dark,
-              enabled: enabled,
-              onSelected: _applyAppearance,
-            ),
+        const SizedBox(height: 12),
+        DropdownButtonFormField<_PageAppearance>(
+          key: ValueKey(('reader-appearance', appearance)),
+          initialValue: appearance,
+          isExpanded: true,
+          decoration: const InputDecoration(
+            labelText: 'Page appearance',
+            border: OutlineInputBorder(),
+          ),
+          hint: const Text('Custom'),
+          items: [
+            for (final preset in _PageAppearance.values)
+              DropdownMenuItem(value: preset, child: Text(preset.label)),
           ],
+          onChanged: enabled
+              ? (value) {
+                  if (value != null) {
+                    _update(
+                      preferences.copyWith(
+                        backgroundColor: value.background,
+                        foregroundColor: value.foreground,
+                        brightness: value.brightness,
+                      ),
+                    );
+                  }
+                }
+              : null,
         ),
         if (capabilities.supportsLinkHighlighting) ...[
           const SizedBox(height: 12),
@@ -291,20 +289,6 @@ final class ReaderSettingsPanel extends StatelessWidget {
 
   void _update(ReaderPreferences preferences) {
     onUpdatePreferences(preferences);
-  }
-
-  void _applyAppearance(
-    Color background,
-    Color foreground,
-    Brightness brightness,
-  ) {
-    _update(
-      snapshot.preferences.copyWith(
-        backgroundColor: background,
-        foregroundColor: foreground,
-        brightness: brightness,
-      ),
-    );
   }
 }
 
@@ -399,48 +383,20 @@ final class _SettingSliderState extends State<_SettingSlider> {
   }
 }
 
-typedef _AppearanceChanged =
-    void Function(Color background, Color foreground, Brightness brightness);
+enum _PageAppearance {
+  light('Light', Color(0xffffffff), Color(0xff1b1b1b), Brightness.light),
+  sepia('Sepia', Color(0xfff4ecd8), Color(0xff3d3527), Brightness.light),
+  night('Night', Color(0xff151719), Color(0xffece7de), Brightness.dark);
 
-final class _AppearancePreset extends StatelessWidget {
-  const _AppearancePreset({
-    required this.label,
-    required this.selected,
-    required this.background,
-    required this.foreground,
-    required this.brightness,
-    required this.enabled,
-    required this.onSelected,
-  });
+  const _PageAppearance(
+    this.label,
+    this.background,
+    this.foreground,
+    this.brightness,
+  );
 
   final String label;
-  final bool selected;
   final Color background;
   final Color foreground;
   final Brightness brightness;
-  final bool enabled;
-  final _AppearanceChanged onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return ChoiceChip(
-      label: Text(label),
-      labelStyle: TextStyle(
-        color: selected ? colors.onSecondaryContainer : colors.onSurface,
-      ),
-      color: WidgetStateProperty.resolveWith(
-        (states) => states.contains(WidgetState.selected)
-            ? colors.secondaryContainer
-            : colors.surfaceContainerLow,
-      ),
-      checkmarkColor: colors.onSecondaryContainer,
-      side: BorderSide(color: colors.outlineVariant),
-      selected: selected,
-      avatar: CircleAvatar(backgroundColor: background),
-      onSelected: enabled
-          ? (_) => onSelected(background, foreground, brightness)
-          : null,
-    );
-  }
 }
