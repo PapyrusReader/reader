@@ -70,6 +70,10 @@ view center survive viewport/layout changes; fit modes adapt to the available
 space. Paginated slots isolate spreads even when zoomed out. pdfrx owns rendering,
 selection, and bounded text search. `PdfReaderTools` exposes zoom, fit, page entry,
 search, and a bounded return history to the shell without exposing PDFium types.
+Each paginated spread retains its viewer and rendered images through a swipe and
+settlement. Neighboring viewers mount lazily and release their resources when
+evicted from the page cache. Search results belong to the document; navigation and
+keyboard focus follow the active spread.
 
 The host persists the synchronized locator separately from `PdfViewState`, which
 is device-local view configuration. `ReaderDocument.initialPdfView` and
