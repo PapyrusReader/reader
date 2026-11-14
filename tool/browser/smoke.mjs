@@ -6,6 +6,7 @@ import { dirname, extname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { checkFormats } from './formats.mjs';
+import { checkMobileEpubScroll } from './epub_scroll.mjs';
 
 const reader = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const dist = resolve(reader, 'example/build/web');
@@ -472,6 +473,7 @@ try {
   await backToLibrary();
   await page.getByRole('button', { name: 'Use light theme', exact: true }).waitFor();
   assert.deepEqual(errors, []);
+  await checkMobileEpubScroll(browser, origin);
   await checkFormats(browser, origin, reader);
   console.log('Browser checks passed: worker protocol, focus mode and chapter keyboard focus, responsive settings, local files, cleanup, PDF pagination/scroll, column/appearance refitting and opened menus under opposite app themes.');
 } finally {

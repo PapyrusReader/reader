@@ -62,6 +62,8 @@ final class _EpubViewportState extends State<EpubViewport> {
       !(MediaQuery.maybeOf(context)?.disableAnimations ?? false);
 
   double _startScroll = 0;
+  double _scrollBoundaryDrag = 0;
+  static const _scrollBoundaryThreshold = 48.0;
   bool _restoring = false;
   bool _busy = false;
   Completer<void>? _layoutReady;
@@ -410,6 +412,10 @@ final class _EpubViewportState extends State<EpubViewport> {
     if (widget.engine.preferences.layoutMode == ReaderLayoutMode.scroll) {
       if (!_scrollController.hasClients) return true;
       final position = _scrollController.position;
+      if ((direction > 0 && position.pixels >= position.maxScrollExtent - 1) ||
+          (direction < 0 && position.pixels <= position.minScrollExtent + 1)) {
+        return false;
+      }
       final next =
           (position.pixels + direction * position.viewportDimension * .85)
               .clamp(0.0, position.maxScrollExtent);
@@ -666,6 +672,28 @@ final class _EpubViewportState extends State<EpubViewport> {
       ],
       atEnd: pixels >= max - 1,
     );
+  }
+
+  bool _trackScrollBoundary(ScrollNotification notification) {
+    if (notification.depth != 0 || notification.metrics.axis != Axis.vertical) {
+      return false;
+    }
+    if (notification is OverscrollNotification &&
+        notification.dragDetails != null) {
+      final delta = notification.overscroll;
+      if (_scrollBoundaryDrag.sign != delta.sign) _scrollBoundaryDrag = 0;
+      _scrollBoundaryDrag += delta;
+    } else if (notification is ScrollUpdateNotification &&
+        notification.dragDetails != null) {
+      final metrics = notification.metrics;
+      _scrollBoundaryDrag =
+          metrics.pixels -
+          metrics.pixels.clamp(
+            metrics.minScrollExtent,
+            metrics.maxScrollExtent,
+          );
+    }
+    return false;
   }
 
   bool _canTurnWithWheel(Offset delta) {
@@ -1142,24 +1170,28 @@ final class _EpubViewportState extends State<EpubViewport> {
                       return start;
                     })(),
                 ];
-                content = ListView.custom(
-                  key: ValueKey(_scrollController),
-                  controller: _scrollController,
-                  itemExtentBuilder: (index, _) => heights[index],
-                  childrenDelegate: _EpubScrollDelegate(
-                    (context, index) => Align(
-                      alignment: Alignment.topCenter,
-                      child: SizedBox(
-                        width: width,
-                        child: _page(
-                          pages[index],
-                          displayPreferences,
-                          scroll: true,
+                content = NotificationListener<ScrollNotification>(
+                  onNotification: _trackScrollBoundary,
+                  child: ListView.custom(
+                    key: ValueKey(_scrollController),
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    controller: _scrollController,
+                    itemExtentBuilder: (index, _) => heights[index],
+                    childrenDelegate: _EpubScrollDelegate(
+                      (context, index) => Align(
+                        alignment: Alignment.topCenter,
+                        child: SizedBox(
+                          width: width,
+                          child: _page(
+                            pages[index],
+                            displayPreferences,
+                            scroll: true,
+                          ),
                         ),
                       ),
+                      childCount: pages.length,
+                      extent: cumulative,
                     ),
-                    childCount: pages.length,
-                    extent: cumulative,
                   ),
                 );
               } else {
@@ -1255,12 +1287,16 @@ final class _EpubViewportState extends State<EpubViewport> {
                 child: Listener(
                   onPointerDown: (event) {
                     _swipe.start(event);
+                    _scrollBoundaryDrag = 0;
                     _startScroll = _scrollController.hasClients
                         ? _scrollController.offset
                         : 0;
                   },
                   onPointerMove: _swipe.update,
-                  onPointerCancel: _swipe.cancel,
+                  onPointerCancel: (event) {
+                    _swipe.cancel(event);
+                    _scrollBoundaryDrag = 0;
+                  },
                   onPointerUp: (event) {
                     final offset = _swipe.end(event);
 
@@ -1281,14 +1317,19 @@ final class _EpubViewportState extends State<EpubViewport> {
                     if (scrolling && _scrollController.hasClients) {
                       final position = _scrollController.position;
 
-                      if (drag < 0 &&
-                          _startScroll >= position.maxScrollExtent - 1) {
-                        _requestTurn(1);
-                      }
-
-                      if (drag > 0 && _startScroll <= 1) {
-                        _requestTurn(-1);
-                      }
+                      final next =
+                          drag < 0 &&
+                          (_scrollBoundaryDrag >= _scrollBoundaryThreshold ||
+                              (_startScroll >= position.maxScrollExtent - 1 &&
+                                  position.pixels >=
+                                      position.maxScrollExtent - 1));
+                      final previous =
+                          drag > 0 &&
+                          (_scrollBoundaryDrag <= -_scrollBoundaryThreshold ||
+                              (_startScroll <= position.minScrollExtent + 1 &&
+                                  position.pixels <=
+                                      position.minScrollExtent + 1));
+                      if (next || previous) _requestTurn(next ? 1 : -1);
                     } else {
                       if (drag < 0 && !_animateTurns) {
                         _requestTurn(1);

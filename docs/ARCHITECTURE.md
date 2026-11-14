@@ -115,7 +115,10 @@ and modifier-key zoom retain native wheel input.
 Continuous EPUB uses a full-width scroll surface with centered text and a viewport-edge
 scrollbar. Its chunk extents use the rendered fragment heights, including text reshaping
 at paragraph cuts. Outward wheel input at a chapter edge opens the adjacent chapter;
-backward navigation restores its bottom.
+backward navigation restores its bottom. Touch drags can reach and continue beyond
+an edge in one gesture, including under bouncing physics. Only a completed,
+unselected single-touch gesture commits the adjacent chapter; inertial scrolling
+and cancelled gestures do not trigger a chapter turn.
 
 Internal presentation modules are not public API. Host customization uses
 `ReaderUiBuilders` and exported builder contexts. A `compactPanelRoute` factory
