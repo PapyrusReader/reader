@@ -1221,7 +1221,7 @@ final class _EpubViewportState extends State<EpubViewport> {
                 );
               }
               content = ReaderPageWheel(
-                canTurn: () =>
+                canTurn: (_) =>
                     ready &&
                     displayPreferences.layoutMode == ReaderLayoutMode.paginated,
                 onTurn: (direction) {

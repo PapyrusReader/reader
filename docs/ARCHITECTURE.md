@@ -105,7 +105,10 @@ same page controller as touch and can interrupt an unfinished turn.
 Wheel input turns paginated pages immediately without changing the animation
 preference. Small nonzero deltas count as a turn; same-direction bursts are
 limited to one turn per 120 ms, while reversing direction responds immediately.
-Continuous readers, zoomed PDFs, and modifier-key zoom retain native wheel input.
+Zoomed PDFs pan within the current spread; scrolling outward at its top or bottom
+turns the page without animation. Forward turns open at the top, backward turns
+at the bottom, preserving zoom. Horizontal zoomed panning, continuous readers,
+and modifier-key zoom retain native wheel input.
 
 Internal presentation modules are not public API. Host customization uses
 `ReaderUiBuilders` and exported builder contexts. A `compactPanelRoute` factory

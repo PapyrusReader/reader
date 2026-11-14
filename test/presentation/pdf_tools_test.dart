@@ -171,6 +171,110 @@ void main() {
     },
   );
 
+  for (final facingPages in [false, true]) {
+    testWidgets(
+      'zoomed PDF wheel pans and turns at spread edges, facing $facingPages',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(1440, 900));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final bytes = await tester.runAsync(() => _document(pageCount: 5));
+        await tester.runAsync(initializePdfiumForTest);
+        final facade = (await tester.runAsync(
+          () => createPdfrxFacade(bytes!, sourceName: 'zoomed-wheel'),
+        ))!;
+        final tools = facade as PdfReaderTools;
+        addTearDown(() => (facade as DisposablePdfFacade).dispose());
+        var reportedOffset = 0.0;
+        await tester.pumpWidget(
+          MaterialApp(
+            home: facade.buildViewport(
+              PdfViewportConfiguration(
+                pageIndex: 0,
+                facingPages: facingPages,
+                backgroundColor: Colors.white,
+                brightness: Brightness.light,
+                layoutMode: ReaderLayoutMode.paginated,
+                onPageChanged: (_) {},
+                onPositionChanged: (_, offset) => reportedOffset = offset,
+              ),
+            ),
+          ),
+        );
+        await _ready(tester, tools);
+        await tester.pumpAndSettle();
+        await tools.setZoom(tools.zoom * 3);
+        await tester.pumpAndSettle();
+        final zoom = tools.zoom;
+        PdfViewerController controller() => tester
+            .widgetList<PdfViewer>(find.byType(PdfViewer))
+            .firstWhere(
+              (viewer) => viewer.initialPageNumber == tools.pageNumber,
+            )
+            .controller!;
+        Rect spread() => pdfSpreadRect(
+          controller().layout,
+          tools.pageNumber - 1,
+          facingPages,
+        );
+        Future<void> wheel(Offset delta) async {
+          await tester.sendEventToBinding(
+            PointerScrollEvent(
+              position: const Offset(720, 450),
+              scrollDelta: delta,
+            ),
+          );
+          await tester.pumpAndSettle();
+          await _ready(tester, tools);
+          await tester.pump(const Duration(milliseconds: 120));
+        }
+
+        Future<void> pan(double distance) async {
+          await tools.scrollVertically(distance);
+          await tester.pumpAndSettle();
+        }
+
+        final before = controller().visibleRect.top;
+        await wheel(const Offset(0, 40));
+        expect(tools.pageNumber, 1);
+        expect(controller().visibleRect.top, greaterThan(before));
+        await pan(-100000);
+        await wheel(const Offset(0, -1));
+        expect(tools.pageNumber, 1, reason: 'The first page is a boundary');
+        await pan(100000);
+        await wheel(const Offset(40, 0));
+        expect(
+          tools.pageNumber,
+          1,
+          reason: 'Horizontal zoomed input still pans',
+        );
+        await wheel(const Offset(0, 1));
+        expect(tools.pageNumber, facingPages ? 3 : 2);
+        expect(tools.zoom, closeTo(zoom, .001));
+        expect(controller().visibleRect.top, closeTo(spread().top, .01));
+        expect(reportedOffset, closeTo(0, .001));
+        await wheel(const Offset(0, -1));
+        expect(tools.pageNumber, 1);
+        expect(tools.zoom, closeTo(zoom, .001));
+        expect(controller().visibleRect.bottom, closeTo(spread().bottom, .01));
+        expect(reportedOffset, greaterThan(0));
+        final bottom = controller().visibleRect.top;
+        await wheel(const Offset(0, -40));
+        expect(
+          tools.pageNumber,
+          1,
+          reason: 'Reverse input pans into the previous page',
+        );
+        expect(controller().visibleRect.top, lessThan(bottom));
+        await _navigate(tester, facade.showPage(4, 0));
+        await pan(100000);
+        await wheel(const Offset(0, 1));
+        expect(tools.pageNumber, 5, reason: 'The last page is a boundary');
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+  }
+
   for (final kind in [PointerDeviceKind.touch, PointerDeviceKind.mouse]) {
     for (final direction in [1, -1]) {
       testWidgets(

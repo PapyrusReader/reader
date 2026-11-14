@@ -160,6 +160,41 @@ try {
       assert.deepEqual(errors, []);
       console.log('PASS: desktop mouse hold, text selection, and reverse swipe');
     }
+    await page.keyboard.press('Escape');
+    const zoomControl = page.getByRole('button', { name: /^Zoom \d+ percent\. Set zoom$/ });
+    await zoomControl.waitFor();
+    await page.waitForTimeout(300);
+    const zoomBounds = await zoomControl.boundingBox();
+    assert.ok(zoomBounds);
+    // Flutter's canvas routes the pointer past overlapping semantics nodes.
+    await page.mouse.click(zoomBounds.x + zoomBounds.width / 2, zoomBounds.y + zoomBounds.height / 2);
+    await page.getByRole('textbox', { name: 'Zoom percentage' }).fill('200');
+    await page.getByRole('button', { name: 'Apply', exact: true }).click();
+    await page.getByRole('button', { name: 'Zoom 200 percent. Set zoom', exact: true }).waitFor();
+    await page.keyboard.press('Escape');
+    await page.mouse.move(width / 2, 450);
+    const wheel = async delta => {
+      await page.mouse.wheel(0, delta);
+      await page.waitForTimeout(400);
+    };
+    await wheel(40);
+    await assertPage(5);
+    await wheel(100000);
+    await assertPage(5);
+    await wheel(1);
+    await assertPage(6);
+    await wheel(-1);
+    await assertPage(5);
+    await wheel(-40);
+    await assertPage(5);
+    await wheel(-100000);
+    await assertPage(5);
+    await wheel(-1);
+    await assertPage(4);
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'Zoom 200 percent. Set zoom', exact: true }).waitFor();
+    assert.deepEqual(errors, []);
+    console.log(`PASS: ${width}px zoomed PDF wheel pans within pages and turns at both edges`);
     await page.close();
   }
 } finally {

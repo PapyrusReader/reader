@@ -527,7 +527,14 @@ final class _PdfrxFacade extends PdfReaderTools
   final List<PdfFacadeOutlineEntry> outline;
 
   @override
-  Future<void> showPage(int pageIndex, double pageOffset) async {
+  Future<void> showPage(int pageIndex, double pageOffset) =>
+      _showPage(pageIndex, pageOffset);
+
+  Future<void> _showPage(
+    int pageIndex,
+    double pageOffset, {
+    bool alignBottom = false,
+  }) async {
     final previous = _captureView();
     _pageOffset = pageOffset;
     if (!await _activatePage(pageIndex)) return;
@@ -539,7 +546,10 @@ final class _PdfrxFacade extends PdfReaderTools
       _savedView = null;
       _restoring = true;
       try {
-        await _restorePage(zoomOverride: previous?.zoom);
+        await _restorePage(
+          zoomOverride: previous?.zoom,
+          alignBottom: alignBottom,
+        );
       } finally {
         _restoring = false;
       }
@@ -562,6 +572,23 @@ final class _PdfrxFacade extends PdfReaderTools
   bool get _atFit =>
       _controller.isReady && _controller.currentZoom <= _fitZoom * 1.02;
 
+  bool _canTurnWithWheel(Offset delta) {
+    if (_disposed ||
+        _restoring ||
+        _configuration?.layoutMode != ReaderLayoutMode.paginated ||
+        !_controller.isReady) {
+      return false;
+    }
+    if (_atFit) return true;
+    if (delta.dy.abs() <= delta.dx.abs()) return false;
+
+    final visible = _controller.visibleRect;
+    final tolerance = 1 / zoom;
+    return delta.dy < 0
+        ? visible.top <= _spread.top + tolerance
+        : visible.bottom >= _spread.bottom - tolerance;
+  }
+
   double _zoomFor(PdfFitMode mode) => switch (mode) {
     PdfFitMode.page => _fitZoom,
     PdfFitMode.width => _controller.viewSize.width / _spread.width,
@@ -571,6 +598,7 @@ final class _PdfrxFacade extends PdfReaderTools
   Future<void> _restorePage({
     bool restoreLocation = false,
     double? zoomOverride,
+    bool alignBottom = false,
   }) async {
     final config = _configuration;
     if (config == null) return;
@@ -585,7 +613,12 @@ final class _PdfrxFacade extends PdfReaderTools
     final page = _controller.layout.pageLayouts[_pageIndex];
     final saved = _savedView;
     final Offset center;
-    if (!_preferInitialLocator &&
+    if (alignBottom) {
+      center = Offset(
+        _spread.center.dx,
+        _spread.bottom - _controller.viewSize.height / (2 * scale),
+      );
+    } else if (!_preferInitialLocator &&
         saved != null &&
         saved.pageIndex == _pageIndex &&
         (restoreLocation || _fitMode != PdfFitMode.page)) {
@@ -615,7 +648,7 @@ final class _PdfrxFacade extends PdfReaderTools
     }
   }
 
-  Future<void> _turnSpread(int direction) async {
+  Future<void> _turnSpread(int direction, {bool fromWheel = false}) async {
     final config = _configuration;
     if (_disposed || _restoring || config == null || !_controller.isReady) {
       return;
@@ -624,9 +657,17 @@ final class _PdfrxFacade extends PdfReaderTools
     final target = (_pageIndex ~/ step) * step + direction * step;
     if (target < 0 || target >= pageCount) return;
     await _controller.textSelectionDelegate.clearTextSelection();
-    await showPage(target, 0);
+    final alignBottom = fromWheel && direction < 0 && !_atFit;
+    await _showPage(target, 0, alignBottom: alignBottom);
     if (_disposed) return;
-    config.onPositionChanged?.call(target, 0);
+    final page = _controller.layout.pageLayouts[target];
+    final offset = alignBottom
+        ? ((_controller.visibleRect.top - page.top) / page.height).clamp(
+            0.0,
+            1.0,
+          )
+        : 0.0;
+    config.onPositionChanged?.call(target, offset);
     if (config.onPositionChanged == null) config.onPageChanged(target);
   }
 
@@ -1000,11 +1041,8 @@ final class _PdfrxFacade extends PdfReaderTools
 
           final pages = _pagesController;
           return ReaderPageWheel(
-            canTurn: () =>
-                configuration.layoutMode == ReaderLayoutMode.paginated &&
-                !_restoring &&
-                _atFit,
-            onTurn: _turnSpread,
+            canTurn: _canTurnWithWheel,
+            onTurn: (direction) => _turnSpread(direction, fromWheel: true),
             child: applyPdfBrightness(
               preserveColors ? Brightness.light : configuration.brightness,
               pages == null

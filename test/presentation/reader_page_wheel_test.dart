@@ -14,7 +14,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: ReaderPageWheel(
-            canTurn: () => canTurn,
+            canTurn: (_) => canTurn,
             onTurn: (direction) async => turns.add(direction),
             child: Listener(
               behavior: HitTestBehavior.opaque,

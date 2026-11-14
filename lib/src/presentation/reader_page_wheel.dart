@@ -15,7 +15,7 @@ final class ReaderPageWheel extends StatefulWidget {
     super.key,
   });
 
-  final bool Function() canTurn;
+  final bool Function(Offset delta) canTurn;
   final Future<void> Function(int direction) onTurn;
   final Widget child;
 
@@ -30,7 +30,7 @@ final class _ReaderPageWheelState extends State<ReaderPageWheel> {
 
   void _signal(PointerSignalEvent event) {
     if (event is! PointerScrollEvent ||
-        !widget.canTurn() ||
+        !widget.canTurn(event.scrollDelta) ||
         HardwareKeyboard.instance.isControlPressed ||
         HardwareKeyboard.instance.isMetaPressed) {
       return;
@@ -49,7 +49,9 @@ final class _ReaderPageWheelState extends State<ReaderPageWheel> {
       _cooldown = Timer(const Duration(milliseconds: 120), () {});
       _pending = _pending
           .then((_) async {
-            if (mounted && widget.canTurn()) await widget.onTurn(direction);
+            if (mounted && widget.canTurn(event.scrollDelta)) {
+              await widget.onTurn(direction);
+            }
           })
           .catchError((Object error, StackTrace stack) {
             if (error is ReaderException &&
