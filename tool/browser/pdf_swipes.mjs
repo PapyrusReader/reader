@@ -121,17 +121,32 @@ try {
         maxFrameGapMs: gaps.at(-1), framesOver50Ms: gaps.filter(gap => gap > 50).length,
         longTaskCount: tasks.length, maxLongTaskMs: Math.max(0, ...tasks) };
     });
-    const assertPage = async number => {
-      if (await page.getByRole('button', { name: 'Back', exact: true }).count() === 0) {
+    const setControlsVisible = async visible => {
+      const back = page.getByRole('button', { name: 'Back', exact: true });
+      // Escape can first dismiss a PDF selection. Observe the controls before
+      // sending another key so selection cleanup cannot invert the next check.
+      for (let attempt = 0; attempt < 3 && await back.isVisible() !== visible; attempt++) {
         await page.keyboard.press('Escape');
+        await page.waitForTimeout(300);
       }
+      await back.waitFor({ state: visible ? 'visible' : 'hidden' });
+    };
+    const assertPage = async number => {
+      await setControlsVisible(true);
       try {
         await page.getByRole('button', { name: `Page ${number} of ${Number(process.env.PAPYRUS_PDF_PAGES ?? 40)}. Go to page`, exact: true }).waitFor();
       } catch (error) {
         throw new Error(`Expected active PDF page ${number}:\n${await page.locator('body').ariaSnapshot()}`, { cause: error });
       }
-      await page.keyboard.press('Escape');
-      await page.waitForTimeout(300);
+      await setControlsVisible(false);
+    };
+    const assertZoom = async (showControls = false) => {
+      if (showControls) await setControlsVisible(true);
+      try {
+        await page.getByRole('button', { name: 'Zoom 200 percent. Set zoom', exact: true }).waitFor();
+      } catch (error) {
+        throw new Error(`Expected zoom controls at 200%:\n${await page.locator('body').ariaSnapshot()}`, { cause: error });
+      }
     };
     await assertPage(5);
     assert.deepEqual(errors, []);
@@ -160,7 +175,7 @@ try {
       assert.deepEqual(errors, []);
       console.log('PASS: desktop mouse hold, text selection, and reverse swipe');
     }
-    await page.keyboard.press('Escape');
+    await setControlsVisible(true);
     const zoomControl = page.getByRole('button', { name: /^Zoom \d+ percent\. Set zoom$/ });
     await zoomControl.waitFor();
     await page.waitForTimeout(300);
@@ -170,8 +185,8 @@ try {
     await page.mouse.click(zoomBounds.x + zoomBounds.width / 2, zoomBounds.y + zoomBounds.height / 2);
     await page.getByRole('textbox', { name: 'Zoom percentage' }).fill('200');
     await page.getByRole('button', { name: 'Apply', exact: true }).click();
-    await page.getByRole('button', { name: 'Zoom 200 percent. Set zoom', exact: true }).waitFor();
-    await page.keyboard.press('Escape');
+    await assertZoom();
+    await setControlsVisible(false);
     await page.mouse.move(width / 2, 450);
     const wheel = async delta => {
       await page.mouse.wheel(0, delta);
@@ -191,12 +206,11 @@ try {
     await assertPage(5);
     await wheel(-1);
     await assertPage(4);
-    await page.keyboard.press('Escape');
-    await page.getByRole('button', { name: 'Zoom 200 percent. Set zoom', exact: true }).waitFor();
+    await assertZoom(true);
     assert.deepEqual(errors, []);
     console.log(`PASS: ${width}px zoomed PDF wheel pans within pages and turns at both edges`);
     if (input === 'mouse') {
-      await page.keyboard.press('Escape');
+      await setControlsVisible(false);
       for (let turn = 0; turn < 3; turn++) {
         await swipe(1, true);
         await page.waitForTimeout(70);
@@ -216,12 +230,11 @@ try {
       await page.mouse.click(width * .9, 450);
       await page.waitForTimeout(300);
       await assertPage(6);
-      await page.keyboard.press('Escape');
-      await page.getByRole('button', { name: 'Zoom 200 percent. Set zoom', exact: true }).waitFor();
+      await assertZoom(true);
       assert.deepEqual(errors, []);
       console.log('PASS: zoomed PDF rapid mouse drags, reverse turn, retained zoom, and text selection');
       await page.emulateMedia({ reducedMotion: 'reduce' });
-      await page.keyboard.press('Escape');
+      await setControlsVisible(false);
       await page.waitForTimeout(300);
       await swipe(1, true);
       await page.waitForTimeout(300);
