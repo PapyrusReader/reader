@@ -195,12 +195,21 @@ try {
     'A page turn keeps its place, while emphasis and meaning remain part of the story. ' +
     'Resize the window or change the typeface to try reflow.', { exact: true }).first();
   const beforeWheel = await paragraph.boundingBox();
+  const location = page.getByRole('group', { name: /^Chapter \d+ of/ }).first();
+  const beforeWheelLocation = await location.getAttribute('aria-label');
   await page.mouse.move(160, 300);
-  await page.mouse.wheel(0, 600);
+  await page.mouse.wheel(0, 1);
+  await page.waitForFunction(previous =>
+    document.querySelector('[aria-label^="Chapter "]')?.getAttribute('aria-label') !== previous,
+  beforeWheelLocation);
+  await page.mouse.wheel(0, -1);
+  await page.waitForFunction(previous =>
+    document.querySelector('[aria-label^="Chapter "]')?.getAttribute('aria-label') === previous,
+  beforeWheelLocation);
   await settle();
   const afterWheel = await paragraph.boundingBox();
   assert.ok(beforeWheel && afterWheel && Math.abs(beforeWheel.y - afterWheel.y) < 1,
-    'A normal paginated column must fit without hidden vertical overflow');
+    'A wheel turn and reversal must restore the same page geometry');
   await openSettings();
   await select('Slide', 'None');
   await screenshot('desktop-instant-turns');

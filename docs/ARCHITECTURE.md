@@ -102,6 +102,10 @@ In paginated text formats, mouse drags starting in blank space, including the
 outer window margins, turn pages;
 drags starting on rendered text remain selection gestures. Mouse turns use the
 same page controller as touch and can interrupt an unfinished turn.
+Wheel input turns paginated pages immediately without changing the animation
+preference. Small nonzero deltas count as a turn; same-direction bursts are
+limited to one turn per 120 ms, while reversing direction responds immediately.
+Continuous readers, zoomed PDFs, and modifier-key zoom retain native wheel input.
 
 Internal presentation modules are not public API. Host customization uses
 `ReaderUiBuilders` and exported builder contexts. A `compactPanelRoute` factory

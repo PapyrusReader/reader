@@ -72,7 +72,7 @@ final class EpubReaderEngine extends ReaderEngine {
 
   /// The viewport owns page turns, including transitions across spine items.
   /// The engine handles boundaries when no paginated viewport is mounted.
-  Future<bool> Function(int direction)? moveViewport;
+  Future<bool> Function(int direction, {required bool animate})? moveViewport;
 
   String get currentChapterHtml => _currentChapterHtml;
   List<EpubContentBlock> get blocks => _blocks;
@@ -385,12 +385,12 @@ final class EpubReaderEngine extends ReaderEngine {
   }
 
   @override
-  Future<void> goNext() => _queueTurn(1);
+  Future<void> goNext() => turnPage(1);
   @override
-  Future<void> goPrevious() => _queueTurn(-1);
+  Future<void> goPrevious() => turnPage(-1);
 
-  Future<void> _queueTurn(int direction) {
-    final turn = _turnQueue.then((_) => _move(direction));
+  Future<void> turnPage(int direction, {bool animate = true}) {
+    final turn = _turnQueue.then((_) => _move(direction, animate: animate));
     _turnQueue = turn.catchError((Object _) {});
     return turn;
   }
@@ -446,14 +446,14 @@ final class EpubReaderEngine extends ReaderEngine {
     return chapter;
   }
 
-  Future<void> _move(int direction) async {
+  Future<void> _move(int direction, {required bool animate}) async {
     if (_locator == null) {
       throw const ReaderException(
         ReaderErrorCode.engineUnavailable,
         'No EPUB document is loaded.',
       );
     }
-    if (await moveViewport?.call(direction) ?? false) return;
+    if (await moveViewport?.call(direction, animate: animate) ?? false) return;
     final index = _locator!.spineIndex + direction;
     if (index < 0 || index >= _chapterCount) {
       throw const ReaderException(

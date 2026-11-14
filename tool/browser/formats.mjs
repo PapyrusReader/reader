@@ -136,6 +136,13 @@ export async function checkFormats(browser, origin, reader) {
       assert.notEqual(await location(), initial, `${format} mouse drag must advance the committed page`);
       await mouseSwipe(-1);
       assert.equal(await location(), initial, `${format} reverse mouse drag must restore the initial page`);
+      await page.mouse.move(550, 400);
+      await page.mouse.wheel(0, 1);
+      await page.waitForTimeout(500);
+      assert.notEqual(await location(), initial, `${format} a small wheel movement must turn the page`);
+      await page.mouse.wheel(0, -1);
+      await page.waitForTimeout(500);
+      assert.equal(await location(), initial, `${format} reverse wheel input must restore the initial page`);
       await next.click({ force: true });
       await page.waitForTimeout(500);
       assert.ok(await page.getByRole('button', { name: 'Previous', exact: true }).isEnabled());
@@ -143,7 +150,7 @@ export async function checkFormats(browser, origin, reader) {
         await mkdir(process.env.PAPYRUS_SCREENSHOT_DIR, { recursive: true });
         await page.screenshot({ path: resolve(process.env.PAPYRUS_SCREENSHOT_DIR, `format-${fixture?.replaceAll('/', '-') ?? format}.png`) });
       }
-      console.log(`PASS: ${fixture ?? format} rendered viewport, mouse swipes, and navigation`);
+      console.log(`PASS: ${fixture ?? format} rendered viewport, mouse swipes, wheel turns, and navigation`);
     }
     assert.deepEqual(errors, []);
   } finally { await page.close(); }

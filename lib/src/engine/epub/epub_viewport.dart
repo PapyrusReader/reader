@@ -12,6 +12,7 @@ import '../../presentation/reader_interaction_scope.dart';
 import '../../presentation/reader_loading.dart';
 import '../../presentation/reader_swipe_tracker.dart';
 import '../../presentation/reader_mouse_page_drag.dart';
+import '../../presentation/reader_page_wheel.dart';
 import '../../presentation/reader_highlight_interaction.dart';
 import '../../presentation/reader_text_toolbar.dart';
 import 'epub_reader_engine.dart';
@@ -396,7 +397,7 @@ final class _EpubViewportState extends State<EpubViewport> {
     });
   }
 
-  Future<bool> _move(int direction) async {
+  Future<bool> _move(int direction, {required bool animate}) async {
     await _boundaryCommit;
     while (_busy && mounted) {
       final ready = _layoutReady;
@@ -450,7 +451,7 @@ final class _EpubViewportState extends State<EpubViewport> {
       final target = next + _leadingPages;
       _commandTurning = true;
       try {
-        if (_animateTurns) {
+        if (animate && _animateTurns) {
           await controller.animateToPage(
             target,
             duration: _turnDuration,
@@ -484,7 +485,7 @@ final class _EpubViewportState extends State<EpubViewport> {
       return true;
     }
 
-    if (!_animateTurns) {
+    if (!animate || !_animateTurns) {
       controller.jumpToPage(next + _leadingPages);
     } else {
       await controller.animateToPage(
@@ -1219,6 +1220,16 @@ final class _EpubViewportState extends State<EpubViewport> {
                   ),
                 );
               }
+              content = ReaderPageWheel(
+                canTurn: () =>
+                    ready &&
+                    displayPreferences.layoutMode == ReaderLayoutMode.paginated,
+                onTurn: (direction) {
+                  _selectionKey.currentState?.selectableRegion.clearSelection();
+                  return widget.engine.turnPage(direction, animate: false);
+                },
+                child: content,
+              );
               final surface = ReaderHighlightInteraction(
                 hitTest: _highlightAt,
                 isSelecting: () => _selectedText.isNotEmpty,

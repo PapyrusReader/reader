@@ -9,6 +9,7 @@ import 'package:pdfrx/pdfrx.dart';
 import '../../domain/reader_types.dart';
 import '../../domain/reader_selection.dart';
 import '../../domain/reader_locator.dart';
+import '../../presentation/reader_page_wheel.dart';
 import '../../presentation/reader_interaction_scope.dart';
 import '../../presentation/reader_swipe_tracker.dart';
 import '../../presentation/reader_highlight_interaction.dart';
@@ -510,7 +511,6 @@ final class _PdfrxFacade extends PdfReaderTools
   bool _disposed = false;
   Object? _viewKey;
   int _viewerRevision = 0;
-  DateTime? _lastWheelTurn;
   final _swipe = ReaderSwipeTracker();
   bool _textSelected = false;
   PageController? _pagesController;
@@ -623,6 +623,7 @@ final class _PdfrxFacade extends PdfReaderTools
     final step = config.facingPages ? 2 : 1;
     final target = (_pageIndex ~/ step) * step + direction * step;
     if (target < 0 || target >= pageCount) return;
+    await _controller.textSelectionDelegate.clearTextSelection();
     await showPage(target, 0);
     if (_disposed) return;
     config.onPositionChanged?.call(target, 0);
@@ -783,41 +784,6 @@ final class _PdfrxFacade extends PdfReaderTools
             }
 
             final viewer = Listener(
-              onPointerSignal: (event) {
-                if (configuration.layoutMode != ReaderLayoutMode.paginated ||
-                    event is! PointerScrollEvent ||
-                    _restoring ||
-                    !_atFit ||
-                    HardwareKeyboard.instance.isControlPressed ||
-                    HardwareKeyboard.instance.isMetaPressed) {
-                  return;
-                }
-                final delta =
-                    event.scrollDelta.dy.abs() >= event.scrollDelta.dx.abs()
-                    ? event.scrollDelta.dy
-                    : event.scrollDelta.dx;
-                if (delta.abs() < 10) return;
-                final now = DateTime.now();
-                if (_lastWheelTurn != null &&
-                    now.difference(_lastWheelTurn!).inMilliseconds < 250) {
-                  return;
-                }
-                _lastWheelTurn = now;
-                // Let pdfrx finish handling the wheel before snapping to the next row.
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (!_disposed && revision == _viewerRevision) {
-                    final turn = ReaderInteractionScope.maybeOf(
-                      context,
-                    )?.onTurn;
-                    if (turn != null) {
-                      turn(delta > 0 ? 1 : -1);
-                    } else {
-                      _turnSpread(delta > 0 ? 1 : -1);
-                    }
-                  }
-                });
-                WidgetsBinding.instance.scheduleFrame();
-              },
               onPointerDown: (event) {
                 _swipe.start(event);
                 _startLinkTap(event);
@@ -1033,50 +999,57 @@ final class _PdfrxFacade extends PdfReaderTools
           }
 
           final pages = _pagesController;
-          return applyPdfBrightness(
-            preserveColors ? Brightness.light : configuration.brightness,
-            pages == null
-                ? buildViewer(0)
-                : Listener(
-                    onPointerDown: _pagePointerDown,
-                    onPointerUp: _pagePointerEnded,
-                    onPointerCancel: _pagePointerEnded,
-                    child: NotificationListener<ScrollEndNotification>(
-                      onNotification: (notification) {
-                        if (notification.depth == 0) {
-                          scheduleMicrotask(_settlePage);
-                        }
-                        return false;
-                      },
-                      child: ScrollConfiguration(
-                        behavior: ScrollConfiguration.of(context).copyWith(
-                          // The incoming viewer is inactive until settlement.
-                          // Its parent must still accept a mouse drag mid-turn.
-                          dragDevices: {
-                            ...ScrollConfiguration.of(context).dragDevices,
-                            PointerDeviceKind.mouse,
-                          },
-                        ),
-                        child: PageView.builder(
-                          key: ValueKey(pages),
-                          controller: pages,
-                          allowImplicitScrolling: true,
-                          physics: _pagingEnabled
-                              ? const ClampingScrollPhysics()
-                              : const NeverScrollableScrollPhysics(),
-                          itemCount: (pageCount / _spreadStep).ceil(),
-                          itemBuilder: (context, index) => SizedBox.expand(
-                            key: ValueKey(('pdf-spread', index)),
-                            child: _PdfSpreadLoader(
-                              pages: pages,
-                              index: index,
-                              builder: (_) => buildViewer(index),
+          return ReaderPageWheel(
+            canTurn: () =>
+                configuration.layoutMode == ReaderLayoutMode.paginated &&
+                !_restoring &&
+                _atFit,
+            onTurn: _turnSpread,
+            child: applyPdfBrightness(
+              preserveColors ? Brightness.light : configuration.brightness,
+              pages == null
+                  ? buildViewer(0)
+                  : Listener(
+                      onPointerDown: _pagePointerDown,
+                      onPointerUp: _pagePointerEnded,
+                      onPointerCancel: _pagePointerEnded,
+                      child: NotificationListener<ScrollEndNotification>(
+                        onNotification: (notification) {
+                          if (notification.depth == 0) {
+                            scheduleMicrotask(_settlePage);
+                          }
+                          return false;
+                        },
+                        child: ScrollConfiguration(
+                          behavior: ScrollConfiguration.of(context).copyWith(
+                            // The incoming viewer is inactive until settlement.
+                            // Its parent must still accept a mouse drag mid-turn.
+                            dragDevices: {
+                              ...ScrollConfiguration.of(context).dragDevices,
+                              PointerDeviceKind.mouse,
+                            },
+                          ),
+                          child: PageView.builder(
+                            key: ValueKey(pages),
+                            controller: pages,
+                            allowImplicitScrolling: true,
+                            physics: _pagingEnabled
+                                ? const ClampingScrollPhysics()
+                                : const NeverScrollableScrollPhysics(),
+                            itemCount: (pageCount / _spreadStep).ceil(),
+                            itemBuilder: (context, index) => SizedBox.expand(
+                              key: ValueKey(('pdf-spread', index)),
+                              child: _PdfSpreadLoader(
+                                pages: pages,
+                                index: index,
+                                builder: (_) => buildViewer(index),
+                              ),
                             ),
                           ),
                         ),
                       ),
                     ),
-                  ),
+            ),
           );
         },
       ),

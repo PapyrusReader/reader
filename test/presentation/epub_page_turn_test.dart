@@ -7,6 +7,58 @@ import '../support/in_process_epub_worker.dart';
 import '../support/synthetic_epub.dart';
 
 void main() {
+  testWidgets(
+    'small EPUB wheel turns cross chapters instantly with animations enabled',
+    (tester) async {
+      final engine = testEpubEngine();
+      addTearDown(engine.dispose);
+      await engine.load(
+        ReaderDocument(
+          id: 'wheel-chapters',
+          format: ReaderFormat.epub,
+          loadBytes: () async =>
+              syntheticEpub(firstChapterBody: '<p>First page.</p>'),
+        ),
+        preferences: const ReaderPreferences(),
+      );
+      await tester.pumpWidget(
+        MaterialApp(home: Builder(builder: engine.buildViewport)),
+      );
+      await tester.pumpAndSettle();
+      await tester.sendEventToBinding(
+        const PointerScrollEvent(
+          position: Offset(400, 300),
+          scrollDelta: Offset(0, -1),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(engine.locator.spineIndex, 0);
+      expect(tester.takeException(), isNull);
+      for (final direction in [1, -1]) {
+        await tester.sendEventToBinding(
+          PointerScrollEvent(
+            position: const Offset(400, 300),
+            scrollDelta: Offset(0, direction.toDouble()),
+          ),
+        );
+        for (var frame = 0; frame < 20; frame++) {
+          await tester.pump(const Duration(milliseconds: 16));
+          final pages = tester
+              .widget<PageView>(find.byType(PageView))
+              .controller!;
+          expect(
+            pages.page,
+            closeTo(pages.page!.roundToDouble(), .000001),
+            reason: 'Wheel turns must never animate',
+          );
+        }
+        expect(engine.locator.spineIndex, direction > 0 ? 1 : 0);
+        expect(engine.preferences.pageTurnAnimation, isTrue);
+      }
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   for (final animation in [true, false]) {
     testWidgets(
       'EPUB mouse turns start in outer window margins, animation $animation',

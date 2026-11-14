@@ -94,6 +94,83 @@ Future<void> _navigate(WidgetTester tester, Future<void> operation) async {
 }
 
 void main() {
+  testWidgets(
+    'PDF wheel turns respond to a one-pixel delta and preserve zoomed panning',
+    (tester) async {
+      final bytes = await tester.runAsync(() => _document());
+      await tester.runAsync(initializePdfiumForTest);
+      final facade = (await tester.runAsync(
+        () => createPdfrxFacade(bytes!, sourceName: 'wheel-pdf'),
+      ))!;
+      final tools = facade as PdfReaderTools;
+      addTearDown(() => (facade as DisposablePdfFacade).dispose());
+      await tester.pumpWidget(
+        MaterialApp(
+          home: facade.buildViewport(
+            PdfViewportConfiguration(
+              pageIndex: 0,
+              facingPages: false,
+              backgroundColor: Colors.white,
+              brightness: Brightness.light,
+              layoutMode: ReaderLayoutMode.paginated,
+              onPageChanged: (_) {},
+            ),
+          ),
+        ),
+      );
+      await _ready(tester, tools);
+      await tester.pumpAndSettle();
+      final original = tester
+          .widgetList<PdfViewer>(find.byType(PdfViewer))
+          .firstWhere((viewer) => viewer.initialPageNumber == 1)
+          .controller!;
+      final page = original.document.pages.first;
+      final text = (await tester.runAsync(() => page.loadText()))!;
+      await tester.runAsync(
+        () => original.textSelectionDelegate.selectWord(
+          text.charRects.first.center.toOffsetInDocument(
+            page: page,
+            pageRect: original.layout.pageLayouts.first,
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(original.textSelectionDelegate.hasSelectedText, isTrue);
+      for (final direction in [1, -1]) {
+        await tester.sendEventToBinding(
+          PointerScrollEvent(
+            position: const Offset(400, 300),
+            scrollDelta: Offset(0, direction.toDouble()),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await _ready(tester, tools);
+        expect(tools.pageNumber, direction > 0 ? 2 : 1);
+        expect(original.textSelectionDelegate.hasSelectedText, isFalse);
+        expect(
+          tester.widget<PageView>(find.byType(PageView)).physics,
+          isNot(isA<NeverScrollableScrollPhysics>()),
+        );
+        expect(
+          tester.widget<PageView>(find.byType(PageView)).controller!.page,
+          direction > 0 ? 1 : 0,
+        );
+      }
+      await tools.setZoom(tools.zoom * 2);
+      await tester.pumpAndSettle();
+      await tester.sendEventToBinding(
+        const PointerScrollEvent(
+          position: Offset(400, 300),
+          scrollDelta: Offset(0, 120),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tools.pageNumber, 1);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   for (final kind in [PointerDeviceKind.touch, PointerDeviceKind.mouse]) {
     for (final direction in [1, -1]) {
       testWidgets(
