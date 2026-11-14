@@ -518,6 +518,8 @@ final class _PdfrxFacade extends PdfReaderTools
   PageController? _pagesController;
   Drag? _pageDrag;
   bool _pagingEnabled = false;
+  bool _pageSwipeEnabled = false;
+  Offset? _instantMouseDrag;
   final Set<int> _pagePointers = {};
   PointerDownEvent? _pagePointerStart;
   double? _mousePanX;
@@ -802,13 +804,15 @@ final class _PdfrxFacade extends PdfReaderTools
             });
           }
           final revision = _viewerRevision;
-          _pagingEnabled =
+          _pageSwipeEnabled =
               configuration.layoutMode == ReaderLayoutMode.paginated &&
-              configuration.pageTurnAnimation &&
-              !MediaQuery.disableAnimationsOf(context) &&
               !_restoring &&
               !_textSelected &&
               !_multiTouch;
+          _pagingEnabled =
+              _pageSwipeEnabled &&
+              configuration.pageTurnAnimation &&
+              !MediaQuery.disableAnimationsOf(context);
           Widget buildViewer(int index) {
             final spread = _spreadFor(index);
             final controller = spread.controller;
@@ -839,6 +843,7 @@ final class _PdfrxFacade extends PdfReaderTools
               },
               onPointerCancel: (event) {
                 _swipe.cancel(event);
+                _instantMouseDrag = null;
                 _pageDrag?.cancel();
                 _pageDrag = null;
                 _pagesController?.jumpToPage(_pageIndex ~/ _spreadStep);
@@ -1105,11 +1110,13 @@ final class _PdfrxFacade extends PdfReaderTools
   void _pagePointerDown(PointerDownEvent event) {
     _pagePointers.add(event.pointer);
     if (_pagePointers.length == 1) {
+      _instantMouseDrag = null;
       _pagePointerStart = event;
       _mousePanX = null;
     }
     if (_pagePointers.length > 1 && !_multiTouch) {
       _multiTouch = true;
+      _instantMouseDrag = null;
       _pageDrag?.cancel();
       _pageDrag = null;
       _pagesController?.jumpToPage(_pageIndex ~/ _spreadStep);
@@ -1134,7 +1141,7 @@ final class _PdfrxFacade extends PdfReaderTools
         details.pointerCount == 1 && start?.kind == PointerDeviceKind.mouse;
     _mousePanX = null;
     final pages = _pagesController;
-    if (!_pagingEnabled ||
+    if (!_pageSwipeEnabled ||
         pages == null ||
         !pages.hasClients ||
         details.pointerCount != 1) {
@@ -1148,6 +1155,10 @@ final class _PdfrxFacade extends PdfReaderTools
       final delta = details.focalPoint - start!.position;
       if (delta.dx.abs() <= delta.dy.abs()) return;
     }
+    if (!_pagingEnabled) {
+      if (mouse) _instantMouseDrag = details.focalPoint - start!.position;
+      return;
+    }
     _pageDrag = pages.position.drag(
       DragStartDetails(globalPosition: details.focalPoint),
       () => _pageDrag = null,
@@ -1155,6 +1166,12 @@ final class _PdfrxFacade extends PdfReaderTools
   }
 
   void _updatePageDrag(ScaleUpdateDetails details) {
+    if (_instantMouseDrag != null) {
+      _instantMouseDrag =
+          details.pointerCount == 1 && (details.scale - 1).abs() <= .001
+          ? _instantMouseDrag! + details.focalPointDelta
+          : null;
+    }
     final drag = _pageDrag;
     if (drag == null) return;
     if (details.pointerCount != 1 || (details.scale - 1).abs() > .001) {
@@ -1173,6 +1190,13 @@ final class _PdfrxFacade extends PdfReaderTools
   }
 
   void _endPageDrag(ScaleEndDetails details) {
+    final instant = _instantMouseDrag;
+    _instantMouseDrag = null;
+    if (instant != null &&
+        instant.dx.abs() > 70 &&
+        instant.dx.abs() > instant.dy.abs()) {
+      unawaited(_turnSpread(instant.dx < 0 ? 1 : -1));
+    }
     final drag = _pageDrag;
     _pageDrag = null;
     drag?.end(

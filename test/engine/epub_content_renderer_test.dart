@@ -47,6 +47,64 @@ void main() {
     }
   });
 
+  for (final initiallyPaginated in [false, true]) {
+    testWidgets(
+      'custom EPUB renderer crosses chapter edges with touch, initially paginated $initiallyPaginated',
+      (tester) async {
+        final renderer = _TrackingRenderer();
+        final engine = EpubReaderEngine(
+          renderer: renderer,
+          workerFactory: () async => InProcessEpubWorker(),
+        );
+        addTearDown(engine.dispose);
+        await engine.load(
+          ReaderDocument(
+            id: 'custom-touch',
+            format: ReaderFormat.epub,
+            loadBytes: () async => syntheticEpub(),
+          ),
+          preferences: ReaderPreferences(
+            layoutMode: initiallyPaginated
+                ? ReaderLayoutMode.paginated
+                : ReaderLayoutMode.scroll,
+          ),
+        );
+        await tester.pumpWidget(
+          MaterialApp(home: Builder(builder: engine.buildViewport)),
+        );
+        await tester.pumpAndSettle();
+        if (initiallyPaginated) {
+          await engine.updatePreferences(
+            engine.preferences.copyWith(layoutMode: ReaderLayoutMode.scroll),
+          );
+          await tester.pumpAndSettle();
+        }
+        for (final direction in [1, -1]) {
+          final position = renderer.controller.position;
+          renderer.controller.jumpTo(
+            direction > 0 ? position.maxScrollExtent - 40 : 40,
+          );
+          await tester.pumpAndSettle();
+          final before = engine.locator.spineIndex;
+          await tester.dragFrom(
+            const Offset(400, 300),
+            Offset(0, -250.0 * direction),
+          );
+          await tester.pumpAndSettle();
+          expect(engine.locator.spineIndex, before + direction);
+          expect(
+            renderer.controller.offset,
+            closeTo(
+              direction > 0 ? 0 : renderer.controller.position.maxScrollExtent,
+              1,
+            ),
+          );
+        }
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
   testWidgets('programmatic restoration does not publish progress', (
     tester,
   ) async {

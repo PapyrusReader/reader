@@ -617,7 +617,8 @@ final class _EpubViewportState extends State<EpubViewport> {
   }
 
   void _scrollChanged() {
-    if (_restoring ||
+    if (widget.engine.renderer != null ||
+        _restoring ||
         _busy ||
         !_scrollController.hasClients ||
         _pages.isEmpty) {
@@ -694,6 +695,67 @@ final class _EpubViewportState extends State<EpubViewport> {
           );
     }
     return false;
+  }
+
+  Widget _withSwipes({required bool scrolling, required Widget child}) {
+    return Listener(
+      onPointerDown: (event) {
+        _swipe.start(event);
+        _scrollBoundaryDrag = 0;
+        _startScroll = _scrollController.hasClients
+            ? _scrollController.offset
+            : 0;
+      },
+      onPointerMove: _swipe.update,
+      onPointerCancel: (event) {
+        _swipe.cancel(event);
+        _scrollBoundaryDrag = 0;
+      },
+      onPointerUp: (event) {
+        final offset = _swipe.end(event);
+
+        if (offset == null) {
+          return;
+        }
+
+        final drag = scrolling ? offset.dy : offset.dx;
+        final crossAxis = scrolling ? offset.dx : offset.dy;
+
+        if (drag.abs() < 70 || drag.abs() <= crossAxis.abs()) {
+          return;
+        }
+
+        if (scrolling && _scrollController.hasClients) {
+          final position = _scrollController.position;
+
+          final next =
+              drag < 0 &&
+              (_scrollBoundaryDrag >= _scrollBoundaryThreshold ||
+                  (_startScroll >= position.maxScrollExtent - 1 &&
+                      position.pixels >= position.maxScrollExtent - 1));
+          final previous =
+              drag > 0 &&
+              (_scrollBoundaryDrag <= -_scrollBoundaryThreshold ||
+                  (_startScroll <= position.minScrollExtent + 1 &&
+                      position.pixels <= position.minScrollExtent + 1));
+          if (next || previous) _requestTurn(next ? 1 : -1);
+        } else {
+          if (drag < 0 && !_animateTurns) {
+            _requestTurn(1);
+          }
+
+          if (drag > 0 && !_animateTurns) {
+            _requestTurn(-1);
+          }
+        }
+      },
+      child: scrolling
+          ? NotificationListener<ScrollNotification>(
+              onNotification: _trackScrollBoundary,
+              child: child,
+            )
+          : child,
+    );
   }
 
   bool _canTurnWithWheel(Offset delta) {
@@ -1003,15 +1065,18 @@ final class _EpubViewportState extends State<EpubViewport> {
       return ReaderPageWheel(
         canTurn: _canTurnWithWheel,
         onTurn: _turnWithWheel,
-        child: EpubScrollViewport(
-          xhtml: widget.engine.currentChapterHtml,
-          preferences: preferences,
-          localProgression: widget.engine.locator.localProgression,
-          restorationRevision: widget.engine.restorationRevision,
-          renderer: widget.engine.renderer!,
-          controller: _scrollController,
-          onProgressChanged: (value) =>
-              widget.engine.viewportPositionChanged(value),
+        child: _withSwipes(
+          scrolling: true,
+          child: EpubScrollViewport(
+            xhtml: widget.engine.currentChapterHtml,
+            preferences: preferences,
+            localProgression: widget.engine.locator.localProgression,
+            restorationRevision: widget.engine.restorationRevision,
+            renderer: widget.engine.renderer!,
+            controller: _scrollController,
+            onProgressChanged: (value) =>
+                widget.engine.viewportPositionChanged(value),
+          ),
         ),
       );
     }
@@ -1170,28 +1235,25 @@ final class _EpubViewportState extends State<EpubViewport> {
                       return start;
                     })(),
                 ];
-                content = NotificationListener<ScrollNotification>(
-                  onNotification: _trackScrollBoundary,
-                  child: ListView.custom(
-                    key: ValueKey(_scrollController),
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    controller: _scrollController,
-                    itemExtentBuilder: (index, _) => heights[index],
-                    childrenDelegate: _EpubScrollDelegate(
-                      (context, index) => Align(
-                        alignment: Alignment.topCenter,
-                        child: SizedBox(
-                          width: width,
-                          child: _page(
-                            pages[index],
-                            displayPreferences,
-                            scroll: true,
-                          ),
+                content = ListView.custom(
+                  key: ValueKey(_scrollController),
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  controller: _scrollController,
+                  itemExtentBuilder: (index, _) => heights[index],
+                  childrenDelegate: _EpubScrollDelegate(
+                    (context, index) => Align(
+                      alignment: Alignment.topCenter,
+                      child: SizedBox(
+                        width: width,
+                        child: _page(
+                          pages[index],
+                          displayPreferences,
+                          scroll: true,
                         ),
                       ),
-                      childCount: pages.length,
-                      extent: cumulative,
                     ),
+                    childCount: pages.length,
+                    extent: cumulative,
                   ),
                 );
               } else {
@@ -1284,62 +1346,9 @@ final class _EpubViewportState extends State<EpubViewport> {
               final surface = ReaderHighlightInteraction(
                 hitTest: _highlightAt,
                 isSelecting: () => _selectedText.isNotEmpty,
-                child: Listener(
-                  onPointerDown: (event) {
-                    _swipe.start(event);
-                    _scrollBoundaryDrag = 0;
-                    _startScroll = _scrollController.hasClients
-                        ? _scrollController.offset
-                        : 0;
-                  },
-                  onPointerMove: _swipe.update,
-                  onPointerCancel: (event) {
-                    _swipe.cancel(event);
-                    _scrollBoundaryDrag = 0;
-                  },
-                  onPointerUp: (event) {
-                    final offset = _swipe.end(event);
-
-                    if (offset == null) {
-                      return;
-                    }
-
-                    final scrolling =
-                        displayPreferences.layoutMode ==
-                        ReaderLayoutMode.scroll;
-                    final drag = scrolling ? offset.dy : offset.dx;
-                    final crossAxis = scrolling ? offset.dx : offset.dy;
-
-                    if (drag.abs() < 70 || drag.abs() <= crossAxis.abs()) {
-                      return;
-                    }
-
-                    if (scrolling && _scrollController.hasClients) {
-                      final position = _scrollController.position;
-
-                      final next =
-                          drag < 0 &&
-                          (_scrollBoundaryDrag >= _scrollBoundaryThreshold ||
-                              (_startScroll >= position.maxScrollExtent - 1 &&
-                                  position.pixels >=
-                                      position.maxScrollExtent - 1));
-                      final previous =
-                          drag > 0 &&
-                          (_scrollBoundaryDrag <= -_scrollBoundaryThreshold ||
-                              (_startScroll <= position.minScrollExtent + 1 &&
-                                  position.pixels <=
-                                      position.minScrollExtent + 1));
-                      if (next || previous) _requestTurn(next ? 1 : -1);
-                    } else {
-                      if (drag < 0 && !_animateTurns) {
-                        _requestTurn(1);
-                      }
-
-                      if (drag > 0 && !_animateTurns) {
-                        _requestTurn(-1);
-                      }
-                    }
-                  },
+                child: _withSwipes(
+                  scrolling:
+                      displayPreferences.layoutMode == ReaderLayoutMode.scroll,
                   child:
                       Localizations.of<MaterialLocalizations>(
                             context,

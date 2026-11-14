@@ -81,7 +81,8 @@ screen, up to the renderer's one-pass limit. Holding an in-flight turn does not
 commit or snap its location. Horizontal mouse drags turn pages at custom zoom,
 while vertical drags pan and text drags select. During a mouse turn the PDF keeps
 its horizontal position inside the moving spread; the viewer does not also pan.
-Zoomed touch gestures retain document panning and pinch zoom.
+Zoomed touch gestures retain document panning and pinch zoom. With animation disabled
+or reduced motion enabled, mouse turns commit instantly on release.
 
 The host persists the synchronized locator separately from `PdfViewState`, which
 is device-local view configuration. `ReaderDocument.initialPdfView` and
@@ -118,7 +119,8 @@ at paragraph cuts. Outward wheel input at a chapter edge opens the adjacent chap
 backward navigation restores its bottom. Touch drags can reach and continue beyond
 an edge in one gesture, including under bouncing physics. Only a completed,
 unselected single-touch gesture commits the adjacent chapter; inertial scrolling
-and cancelled gestures do not trigger a chapter turn.
+and cancelled gestures do not trigger a chapter turn. Custom scrolling renderers
+share the same chapter boundary gestures.
 
 Internal presentation modules are not public API. Host customization uses
 `ReaderUiBuilders` and exported builder contexts. A `compactPanelRoute` factory

@@ -220,6 +220,17 @@ try {
       await page.getByRole('button', { name: 'Zoom 200 percent. Set zoom', exact: true }).waitFor();
       assert.deepEqual(errors, []);
       console.log('PASS: zoomed PDF rapid mouse drags, reverse turn, retained zoom, and text selection');
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
+      await swipe(1, true);
+      await page.waitForTimeout(300);
+      await assertPage(7);
+      await swipe(-1, true);
+      await page.waitForTimeout(300);
+      await assertPage(6);
+      assert.deepEqual(errors, []);
+      console.log('PASS: reduced-motion PDF mouse turns in both directions at 200% zoom');
     }
     await page.close();
   }

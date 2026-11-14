@@ -640,6 +640,83 @@ void main() {
     });
   }
 
+  for (final reducedMotion in [false, true]) {
+    for (final zoomed in [false, true]) {
+      testWidgets(
+        'PDF instant mouse turns, reduced motion $reducedMotion, zoomed $zoomed',
+        (tester) async {
+          await tester.binding.setSurfaceSize(const Size(1440, 900));
+          addTearDown(() => tester.binding.setSurfaceSize(null));
+          final bytes = await tester.runAsync(_document);
+          await tester.runAsync(initializePdfiumForTest);
+          final facade = (await tester.runAsync(
+            () => createPdfrxFacade(bytes!, sourceName: 'instant-mouse'),
+          ))!;
+          final tools = facade as PdfReaderTools;
+          addTearDown(() => (facade as DisposablePdfFacade).dispose());
+          await tester.pumpWidget(
+            MaterialApp(
+              home: MediaQuery(
+                data: MediaQueryData(disableAnimations: reducedMotion),
+                child: facade.buildViewport(
+                  PdfViewportConfiguration(
+                    pageIndex: 0,
+                    facingPages: false,
+                    pageTurnAnimation: reducedMotion,
+                    backgroundColor: Colors.white,
+                    brightness: Brightness.light,
+                    layoutMode: ReaderLayoutMode.paginated,
+                    onPageChanged: (_) {},
+                  ),
+                ),
+              ),
+            ),
+          );
+          await _ready(tester, tools);
+          await tester.pumpAndSettle();
+          if (zoomed) {
+            await tools.setZoom(tools.zoom * 2);
+            await tester.pumpAndSettle();
+          }
+          final zoom = tools.zoom;
+          final pages = tester
+              .widget<PageView>(find.byType(PageView))
+              .controller!;
+          for (final direction in [1, -1]) {
+            final before = tools.pageNumber;
+            final gesture = await tester.startGesture(
+              const Offset(720, 450),
+              kind: PointerDeviceKind.mouse,
+            );
+            await gesture.moveBy(Offset(-30.0 * direction, 0));
+            await tester.pump();
+            await gesture.moveBy(Offset(-200.0 * direction, 0));
+            await tester.pump(const Duration(milliseconds: 100));
+            expect(tools.pageNumber, before);
+            expect(pages.page, before - 1);
+            await gesture.up();
+            await tester.pumpAndSettle();
+            expect(tools.pageNumber, before + direction);
+            expect(tools.zoom, closeTo(zoom, .001));
+          }
+          final cancelled = await tester.startGesture(
+            const Offset(720, 450),
+            kind: PointerDeviceKind.mouse,
+          );
+          await cancelled.moveBy(const Offset(-30, 0));
+          await tester.pump();
+          await cancelled.moveBy(const Offset(-200, 0));
+          await tester.pump();
+          await cancelled.cancel();
+          await tester.pumpAndSettle();
+          expect(tools.pageNumber, 1);
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox.shrink());
+        },
+      );
+    }
+  }
+
   for (final animation in [true, false]) {
     for (final facing in [false, true]) {
       testWidgets(

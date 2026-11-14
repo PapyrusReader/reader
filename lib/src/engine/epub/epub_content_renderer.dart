@@ -23,6 +23,7 @@ final class FlutterHtmlEpubContentRenderer implements EpubContentRenderer {
     return ColoredBox(
       color: preferences.backgroundColor,
       child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
         controller: controller,
         padding: preferences.pageMargins,
         child: DefaultTextStyle(
