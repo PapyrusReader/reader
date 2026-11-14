@@ -21,9 +21,10 @@ Future<Uint8List> _document({
   pdf.PdfPageFormat? pageFormat,
   bool withLink = false,
   bool samePageLink = false,
+  int pageCount = 3,
 }) async {
   final document = pw.Document();
-  for (var page = 1; page <= 3; page++) {
+  for (var page = 1; page <= pageCount; page++) {
     document.addPage(
       pw.Page(
         pageFormat: pageFormat ?? pdf.PdfPageFormat.a4,
@@ -93,6 +94,87 @@ Future<void> _navigate(WidgetTester tester, Future<void> operation) async {
 }
 
 void main() {
+  for (final direction in [1, -1]) {
+    testWidgets(
+      'PDF swipes can catch and continue a settling turn, direction $direction',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(800, 600));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final bytes = await tester.runAsync(() => _document(pageCount: 6));
+        await tester.runAsync(initializePdfiumForTest);
+        final facade = (await tester.runAsync(
+          () => createPdfrxFacade(bytes!, sourceName: 'repeat-swipes'),
+        ))!;
+        final tools = facade as PdfReaderTools;
+        final initialPage = direction > 0 ? 0 : 5;
+        await facade.showPage(initialPage, 0);
+        addTearDown(() => (facade as DisposablePdfFacade).dispose());
+        await tester.pumpWidget(
+          MaterialApp(
+            home: facade.buildViewport(
+              PdfViewportConfiguration(
+                pageIndex: initialPage,
+                facingPages: false,
+                backgroundColor: Colors.white,
+                brightness: Brightness.light,
+                layoutMode: ReaderLayoutMode.paginated,
+                onPageChanged: (_) {},
+              ),
+            ),
+          ),
+        );
+        await _ready(tester, tools);
+        await tester.pumpAndSettle();
+        var newViewers = 0;
+        debugOnRebuildDirtyWidget = (element, builtOnce) {
+          if (!builtOnce && element.widget is PdfViewer) newViewers++;
+        };
+        addTearDown(() => debugOnRebuildDirtyWidget = null);
+        final pages = tester
+            .widget<PageView>(find.byType(PageView))
+            .controller!;
+        final first = await tester.startGesture(const Offset(400, 300));
+        await first.moveBy(Offset(-30.0 * direction, 0));
+        await tester.pump();
+        await first.moveBy(Offset(-480.0 * direction, 0));
+        await tester.pump(const Duration(milliseconds: 80));
+        expect(
+          newViewers,
+          0,
+          reason: 'Speculative viewers must not initialize during a swipe',
+        );
+        await first.up();
+        await tester.pump(const Duration(milliseconds: 60));
+        expect(pages.position.isScrollingNotifier.value, isTrue);
+        final beforeCatch = pages.position.pixels;
+        final second = await tester.startGesture(const Offset(400, 300));
+        await tester.pump(const Duration(milliseconds: 16));
+        expect(
+          pages.position.pixels,
+          closeTo(beforeCatch, 1),
+          reason: 'Touching a moving page must not snap it to an endpoint',
+        );
+        await second.moveBy(Offset(-30.0 * direction, 0));
+        await tester.pump();
+        final beforeDrag = pages.position.pixels;
+        await second.moveBy(Offset(-120.0 * direction, 0));
+        await tester.pump(const Duration(milliseconds: 16));
+        expect(pages.position.pixels, closeTo(beforeDrag + 120 * direction, 1));
+        await second.moveBy(Offset(-650.0 * direction, 0));
+        await tester.pump(const Duration(milliseconds: 80));
+        await second.up();
+        await tester.pumpAndSettle();
+        expect(tools.pageNumber, direction > 0 ? 3 : 4);
+        expect(tools.canReturn, isTrue);
+        await _navigate(tester, tools.returnToPrevious());
+        await tester.pumpAndSettle();
+        expect(tools.pageNumber, initialPage + 1);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+  }
+
   for (final initialZoom in [null, .5]) {
     testWidgets('PDF page pixels survive settling at zoom $initialZoom', (
       tester,

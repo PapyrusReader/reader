@@ -74,6 +74,11 @@ Each paginated spread retains its viewer and rendered images through a swipe and
 settlement. Neighboring viewers mount lazily and release their resources when
 evicted from the page cache. Search results belong to the document; navigation and
 keyboard focus follow the active spread.
+Speculative viewers initialize while paging is stationary; visible destinations
+can load immediately. Paginated viewers share layout until viewport or page
+dimensions change, and preview images use stable resolution steps sized for the
+screen, up to the renderer's one-pass limit. Holding an in-flight turn does not
+commit or snap its location.
 
 The host persists the synchronized locator separately from `PdfViewState`, which
 is device-local view configuration. `ReaderDocument.initialPdfView` and

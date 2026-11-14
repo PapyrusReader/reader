@@ -455,6 +455,8 @@ final class _PdfrxFacade extends PdfReaderTools
   }
 
   final Map<int, _PdfSpread> _spreads = {};
+  PdfPageLayout? _pageLayout;
+  StreamSubscription<PdfDocumentEvent>? _documentEvents;
   PdfViewerController get _controller => _activeSpread.controller;
   int get _spreadIndex => _configuration?.layoutMode == ReaderLayoutMode.scroll
       ? 0
@@ -727,6 +729,7 @@ final class _PdfrxFacade extends PdfReaderTools
           );
           if (_viewKey != key) {
             _viewKey = key;
+            _pageLayout = null;
             for (final spread in _spreads.values) {
               spread.finish();
             }
@@ -895,6 +898,18 @@ final class _PdfrxFacade extends PdfReaderTools
                     params: buildPdfViewerParams(
                       configuration,
                       viewportSize: size,
+                      layoutPages: paginated
+                          ? (pages, params) =>
+                                _pageLayout ??= buildPaginatedPdfLayout(
+                                  [
+                                    for (final page in pages)
+                                      Size(page.width, page.height),
+                                  ],
+                                  viewportSize: size,
+                                  facingPages: configuration.facingPages,
+                                  margin: params.margin,
+                                )
+                          : null,
                       onInteractionStart: _startPageDrag,
                       onInteractionUpdate: _updatePageDrag,
                       onInteractionEnd: _endPageDrag,
@@ -976,6 +991,13 @@ final class _PdfrxFacade extends PdfReaderTools
                           paginated ? firstPage : _pageIndex,
                       onViewerReady: (_, _) async {
                         if (_disposed || revision != _viewerRevision) return;
+                        _documentEvents ??= controller.document.events.listen((
+                          event,
+                        ) {
+                          if (event is PdfDocumentPageStatusChangedEvent) {
+                            _pageLayout = null;
+                          }
+                        });
                         if (active()) {
                           try {
                             await _restorePage();
@@ -1001,6 +1023,7 @@ final class _PdfrxFacade extends PdfReaderTools
             );
             return _PdfSpreadLifetime(
               key: ValueKey((revision, index)),
+              keepAlive: active(),
               onDispose: () {
                 spread.finish();
                 if (identical(_spreads[index], spread)) _spreads.remove(index);
@@ -1035,7 +1058,11 @@ final class _PdfrxFacade extends PdfReaderTools
                         itemCount: (pageCount / _spreadStep).ceil(),
                         itemBuilder: (context, index) => SizedBox.expand(
                           key: ValueKey(('pdf-spread', index)),
-                          child: buildViewer(index),
+                          child: _PdfSpreadLoader(
+                            pages: pages,
+                            index: index,
+                            builder: (_) => buildViewer(index),
+                          ),
                         ),
                       ),
                     ),
@@ -1114,12 +1141,17 @@ final class _PdfrxFacade extends PdfReaderTools
     final pages = _pagesController;
     if (_disposed ||
         _restoring ||
+        _pagePointers.isNotEmpty ||
         pages == null ||
         !pages.hasClients ||
         pages.position.isScrollingNotifier.value) {
       return;
     }
-    final target = pages.page!.round() * _spreadStep;
+    final page = pages.page!;
+    // A new touch ends the ballistic activity before its next drag starts.
+    // That pause is not a completed turn and must never snap the held page.
+    if ((page - page.round()).abs() > .000001) return;
+    final target = page.round() * _spreadStep;
     if (target == (_pageIndex ~/ _spreadStep) * _spreadStep) return;
     unawaited(showPage(target, 0));
   }
@@ -1191,6 +1223,7 @@ final class _PdfrxFacade extends PdfReaderTools
     _pageDrag?.cancel();
     _pagesController?.dispose();
     _searcher.dispose();
+    _documentEvents?.cancel();
     for (final spread in _spreads.values) {
       spread.finish();
     }
@@ -1271,15 +1304,29 @@ final class _PdfSpreadLifetime extends StatefulWidget {
     super.key,
     required this.child,
     required this.onDispose,
+    required this.keepAlive,
   });
   final Widget child;
   final VoidCallback onDispose;
+  final bool keepAlive;
 
   @override
   State<_PdfSpreadLifetime> createState() => _PdfSpreadLifetimeState();
 }
 
-final class _PdfSpreadLifetimeState extends State<_PdfSpreadLifetime> {
+final class _PdfSpreadLifetimeState extends State<_PdfSpreadLifetime>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => widget.keepAlive;
+
+  @override
+  void didUpdateWidget(_PdfSpreadLifetime oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.keepAlive != widget.keepAlive) {
+      updateKeepAlive();
+    }
+  }
+
   @override
   void dispose() {
     widget.onDispose();
@@ -1287,7 +1334,74 @@ final class _PdfSpreadLifetimeState extends State<_PdfSpreadLifetime> {
   }
 
   @override
-  Widget build(BuildContext context) => widget.child;
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
+  }
+}
+
+/// Warm nearby viewers while stationary. Building a new PDF viewer for an
+/// off-screen cache slot during a turn competes with the browser's animation.
+final class _PdfSpreadLoader extends StatefulWidget {
+  const _PdfSpreadLoader({
+    required this.pages,
+    required this.index,
+    required this.builder,
+  });
+
+  final PageController pages;
+  final int index;
+  final WidgetBuilder builder;
+
+  @override
+  State<_PdfSpreadLoader> createState() => _PdfSpreadLoaderState();
+}
+
+final class _PdfSpreadLoaderState extends State<_PdfSpreadLoader> {
+  bool _loaded = false;
+  late final _scrolling = widget.pages.position.isScrollingNotifier;
+
+  bool get _shouldLoad {
+    final page = widget.pages.page ?? widget.pages.initialPage.toDouble();
+    final visible = (widget.index - page).abs() < 1;
+    final settled = !_scrolling.value && (page - page.round()).abs() < .000001;
+    return visible || settled;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    widget.pages.addListener(_changed);
+    _scrolling.addListener(_changed);
+  }
+
+  void _changed() {
+    if (!_loaded && _shouldLoad) {
+      setState(() => _loaded = true);
+      _stopListening();
+    }
+  }
+
+  void _stopListening() {
+    widget.pages.removeListener(_changed);
+    _scrolling.removeListener(_changed);
+  }
+
+  @override
+  void dispose() {
+    _stopListening();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_loaded && _shouldLoad) {
+      _loaded = true;
+      _stopListening();
+    }
+
+    return _loaded ? widget.builder(context) : const SizedBox.expand();
+  }
 }
 
 PdfViewerParams buildPdfViewerParams(
@@ -1297,6 +1411,7 @@ PdfViewerParams buildPdfViewerParams(
   PdfViewerTextSelectionChangeCallback? onTextSelectionChange,
   ValueChanged<int>? onPageChanged,
   Size viewportSize = const Size(800, 600),
+  PdfPageLayoutFunction? layoutPages,
   int Function()? currentPageIndex,
   PdfViewerContextMenuUpdateMenuItemsFunction? customizeContextMenuItems,
   List<ReaderHighlight> highlights = const [],
@@ -1312,6 +1427,14 @@ PdfViewerParams buildPdfViewerParams(
   final handles = PdfSelectionHandles(viewerController);
   return PdfViewerParams(
     pageDropShadow: null,
+    // Round screen resolution up to stable buckets so fitting a new spread
+    // doesn't immediately replace its image. Keep pdfrx's cap for zoomed tiles.
+    getPageRenderingScale: (context, page, controller, estimatedScale) {
+      final scale =
+          controller.currentZoom * MediaQuery.devicePixelRatioOf(context);
+      final imageScale = pow(2, (log(scale) / ln2).ceil()).toDouble();
+      return min(estimatedScale, imageScale);
+    },
     onInteractionStart: onInteractionStart,
     onInteractionUpdate: onInteractionUpdate,
     onInteractionEnd: onInteractionEnd,
@@ -1394,16 +1517,18 @@ PdfViewerParams buildPdfViewerParams(
     // The layout's outer margin separates pages vertically, but must not add
     // horizontal travel beyond the document edges when fitting its width.
     boundaryMargin: const EdgeInsets.symmetric(horizontal: -8),
-    layoutPages: paginated
-        ? (pages, params) => buildPaginatedPdfLayout(
-            [for (final page in pages) Size(page.width, page.height)],
-            viewportSize: viewportSize,
-            facingPages: configuration.facingPages,
-            margin: params.margin,
-          )
-        : configuration.facingPages
-        ? _facingLayout
-        : null,
+    layoutPages:
+        layoutPages ??
+        (paginated
+            ? (pages, params) => buildPaginatedPdfLayout(
+                [for (final page in pages) Size(page.width, page.height)],
+                viewportSize: viewportSize,
+                facingPages: configuration.facingPages,
+                margin: params.margin,
+              )
+            : configuration.facingPages
+            ? _facingLayout
+            : null),
     // Scroll physics operate on the entire document. Paginated panning is
     // bounded to the active spread instead, with discrete wheel/touch turns.
     scrollPhysics: paginated ? null : const ClampingScrollPhysics(),
