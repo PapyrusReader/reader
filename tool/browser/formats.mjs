@@ -106,10 +106,10 @@ export async function checkFormats(browser, origin, reader) {
         await page.mouse.click(20, 400);
         await next.waitFor({ state: 'hidden' });
         await page.waitForTimeout(300);
-        // Start in the page margin so text selection retains its normal drag.
-        await page.mouse.move(direction > 0 ? 930 : 170, 400);
+        // Start in the outer window margins, beyond the centered text column.
+        await page.mouse.move(direction > 0 ? 1040 : 60, 400);
         await page.mouse.down();
-        await page.mouse.move(direction > 0 ? 170 : 930, 400, { steps: 18 });
+        await page.mouse.move(direction > 0 ? 60 : 1040, 400, { steps: 18 });
         await page.mouse.up();
         await page.waitForTimeout(700);
         await page.mouse.click(20, 400);

@@ -7,6 +7,60 @@ import '../support/in_process_epub_worker.dart';
 import '../support/synthetic_epub.dart';
 
 void main() {
+  for (final animation in [true, false]) {
+    testWidgets(
+      'EPUB mouse turns start in outer window margins, animation $animation',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(1440, 900));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final engine = testEpubEngine();
+        addTearDown(engine.dispose);
+        await engine.load(
+          ReaderDocument(
+            id: 'outer-margins',
+            format: ReaderFormat.epub,
+            loadBytes: () async =>
+                syntheticEpub(firstChapterBody: '<p>First page.</p>'),
+          ),
+          preferences: ReaderPreferences(pageTurnAnimation: animation),
+        );
+        await tester.pumpWidget(
+          MaterialApp(home: Builder(builder: engine.buildViewport)),
+        );
+        await tester.pumpAndSettle();
+        final bounds = tester.getRect(find.byType(PageView));
+        expect(bounds.width, 800);
+        for (final direction in [1, -1]) {
+          final before = engine.locator;
+          final start = Offset(direction > 0 ? 1360 : 80, 450);
+          expect(bounds.contains(start), isFalse);
+          final gesture = await tester.startGesture(
+            start,
+            kind: PointerDeviceKind.mouse,
+          );
+          await gesture.moveBy(Offset(-30.0 * direction, 0));
+          await tester.pump();
+          final pages = tester
+              .widget<PageView>(find.byType(PageView))
+              .controller!;
+          final position = pages.position.pixels;
+          await gesture.moveBy(Offset(-120.0 * direction, 0));
+          await tester.pump(const Duration(milliseconds: 16));
+          expect(
+            pages.position.pixels,
+            closeTo(position + (animation ? 120 * direction : 0), 1),
+          );
+          expect(tester.getRect(find.byType(PageView)), bounds);
+          await gesture.moveBy(Offset(-450.0 * direction, 0));
+          await gesture.up();
+          await tester.pumpAndSettle();
+          expect(engine.locator.spineIndex, before.spineIndex + direction);
+        }
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
   for (final kind in [PointerDeviceKind.touch, PointerDeviceKind.mouse]) {
     for (final facing in [false, true]) {
       testWidgets(
