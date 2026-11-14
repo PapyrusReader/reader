@@ -668,6 +668,25 @@ final class _EpubViewportState extends State<EpubViewport> {
     );
   }
 
+  bool _canTurnWithWheel(Offset delta) {
+    if (_busy || _restoring) return false;
+    if (widget.engine.preferences.layoutMode == ReaderLayoutMode.paginated) {
+      return true;
+    }
+    if (!_scrollController.hasClients || delta.dy.abs() <= delta.dx.abs()) {
+      return false;
+    }
+    final position = _scrollController.position;
+    return delta.dy < 0
+        ? position.pixels <= position.minScrollExtent + 1
+        : position.pixels >= position.maxScrollExtent - 1;
+  }
+
+  Future<void> _turnWithWheel(int direction) {
+    _selectionKey.currentState?.selectableRegion.clearSelection();
+    return widget.engine.turnPage(direction, animate: false);
+  }
+
   void _requestTurn(int direction) {
     final request = ReaderInteractionScope.maybeOf(context)?.onTurn;
 
@@ -953,15 +972,19 @@ final class _EpubViewportState extends State<EpubViewport> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) widget.engine.viewportCoverageChanged(0, 0);
       });
-      return EpubScrollViewport(
-        xhtml: widget.engine.currentChapterHtml,
-        preferences: preferences,
-        localProgression: widget.engine.locator.localProgression,
-        restorationRevision: widget.engine.restorationRevision,
-        renderer: widget.engine.renderer!,
-        controller: _scrollController,
-        onProgressChanged: (value) =>
-            widget.engine.viewportPositionChanged(value),
+      return ReaderPageWheel(
+        canTurn: _canTurnWithWheel,
+        onTurn: _turnWithWheel,
+        child: EpubScrollViewport(
+          xhtml: widget.engine.currentChapterHtml,
+          preferences: preferences,
+          localProgression: widget.engine.locator.localProgression,
+          restorationRevision: widget.engine.restorationRevision,
+          renderer: widget.engine.renderer!,
+          controller: _scrollController,
+          onProgressChanged: (value) =>
+              widget.engine.viewportPositionChanged(value),
+        ),
       );
     }
     return ColoredBox(
@@ -1119,23 +1142,24 @@ final class _EpubViewportState extends State<EpubViewport> {
                       return start;
                     })(),
                 ];
-                content = Center(
-                  child: SizedBox(
-                    width: width,
-                    child: ListView.custom(
-                      key: ValueKey(_scrollController),
-                      controller: _scrollController,
-                      itemExtentBuilder: (index, _) => heights[index],
-                      childrenDelegate: _EpubScrollDelegate(
-                        (context, index) => _page(
+                content = ListView.custom(
+                  key: ValueKey(_scrollController),
+                  controller: _scrollController,
+                  itemExtentBuilder: (index, _) => heights[index],
+                  childrenDelegate: _EpubScrollDelegate(
+                    (context, index) => Align(
+                      alignment: Alignment.topCenter,
+                      child: SizedBox(
+                        width: width,
+                        child: _page(
                           pages[index],
                           displayPreferences,
                           scroll: true,
                         ),
-                        childCount: pages.length,
-                        extent: cumulative,
                       ),
                     ),
+                    childCount: pages.length,
+                    extent: cumulative,
                   ),
                 );
               } else {
@@ -1221,13 +1245,8 @@ final class _EpubViewportState extends State<EpubViewport> {
                 );
               }
               content = ReaderPageWheel(
-                canTurn: (_) =>
-                    ready &&
-                    displayPreferences.layoutMode == ReaderLayoutMode.paginated,
-                onTurn: (direction) {
-                  _selectionKey.currentState?.selectableRegion.clearSelection();
-                  return widget.engine.turnPage(direction, animate: false);
-                },
+                canTurn: (delta) => ready && _canTurnWithWheel(delta),
+                onTurn: _turnWithWheel,
                 child: content,
               );
               final surface = ReaderHighlightInteraction(

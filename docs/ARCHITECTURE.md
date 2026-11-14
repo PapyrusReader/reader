@@ -112,6 +112,10 @@ Zoomed PDFs pan within the current spread; scrolling outward at its top or botto
 turns the page without animation. Forward turns open at the top, backward turns
 at the bottom, preserving zoom. Horizontal zoomed panning, continuous readers,
 and modifier-key zoom retain native wheel input.
+Continuous EPUB uses a full-width scroll surface with centered text and a viewport-edge
+scrollbar. Its chunk extents use the rendered fragment heights, including text reshaping
+at paragraph cuts. Outward wheel input at a chapter edge opens the adjacent chapter;
+backward navigation restores its bottom.
 
 Internal presentation modules are not public API. Host customization uses
 `ReaderUiBuilders` and exported builder contexts. A `compactPanelRoute` factory

@@ -6,6 +6,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter/rendering.dart';
 
 import '../../domain/reader_preferences.dart';
+import '../../domain/reader_types.dart';
 import '../../domain/reader_selection.dart';
 import '../../domain/reader_locator.dart';
 import '../../presentation/reader_interaction_scope.dart';
@@ -224,6 +225,25 @@ Stream<EpubRichPage> paginateEpub(
         textDirection: direction,
         textScaler: textScaler,
       )..layout(maxWidth: width);
+      EpubPageFragment fragment(int start, int end, double height) {
+        if (preferences.layoutMode != ReaderLayoutMode.scroll) {
+          return EpubPageFragment(block, start, end, height);
+        }
+        // A split paragraph is laid out as a new Text widget. Its final newline
+        // or reshaped runs can add a line that was absent from the original cut.
+        // Scroll extents must describe that rendered fragment, not the estimate.
+        final measured = TextPainter(
+          text: block.span(preferences, start: start, end: end),
+          textDirection: direction,
+          textScaler: textScaler,
+        )..layout(maxWidth: width);
+        try {
+          return EpubPageFragment(block, start, end, measured.height);
+        } finally {
+          measured.dispose();
+        }
+      }
+
       try {
         final lines = painter.computeLineMetrics();
         final text = span.toPlainText();
@@ -253,9 +273,7 @@ Stream<EpubRichPage> paginateEpub(
                 )
                 .start;
             if (boundary > start) {
-              fragments.add(
-                EpubPageFragment(block, start, boundary, segmentHeight),
-              );
+              fragments.add(fragment(start, boundary, segmentHeight));
               start = boundary;
             }
             if (fragments.isNotEmpty) {
@@ -267,9 +285,7 @@ Stream<EpubRichPage> paginateEpub(
           segmentHeight += lineHeight;
         }
         if (start < text.length) {
-          fragments.add(
-            EpubPageFragment(block, start, text.length, segmentHeight),
-          );
+          fragments.add(fragment(start, text.length, segmentHeight));
           used += segmentHeight + spacing;
         }
       } finally {
