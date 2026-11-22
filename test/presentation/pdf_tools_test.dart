@@ -95,7 +95,7 @@ Future<void> _navigate(WidgetTester tester, Future<void> operation) async {
 
 void main() {
   testWidgets(
-    'PDF wheel turns respond to a one-pixel delta and preserve zoomed panning',
+    'PDF wheel turns require deliberate scrolling and preserve zoomed panning',
     (tester) async {
       final bytes = await tester.runAsync(() => _document());
       await tester.runAsync(initializePdfiumForTest);
@@ -137,12 +137,26 @@ void main() {
       await tester.pump();
       expect(original.textSelectionDelegate.hasSelectedText, isTrue);
       for (final direction in [1, -1]) {
+        final previousPage = tools.pageNumber;
         await tester.sendEventToBinding(
           PointerScrollEvent(
             position: const Offset(400, 300),
             scrollDelta: Offset(0, direction.toDouble()),
           ),
         );
+        await tester.pump();
+        expect(tools.pageNumber, previousPage);
+        await tester.pump(const Duration(milliseconds: 80));
+
+        for (var tick = 0; tick < 8; tick++) {
+          await tester.sendEventToBinding(
+            PointerScrollEvent(
+              position: const Offset(400, 300),
+              scrollDelta: Offset(0, direction * 80.0),
+            ),
+          );
+          await tester.pump(const Duration(milliseconds: 80));
+        }
         await tester.pumpAndSettle();
         await _ready(tester, tools);
         expect(tools.pageNumber, direction > 0 ? 2 : 1);
@@ -228,6 +242,49 @@ void main() {
           await tester.pump(const Duration(milliseconds: 120));
         }
 
+        Future<void> turn(int direction, {bool withTail = false}) async {
+          await tester.pump(const Duration(milliseconds: 300));
+
+          for (var tick = 0; tick < 8; tick++) {
+            await tester.sendEventToBinding(
+              PointerScrollEvent(
+                position: const Offset(720, 450),
+                scrollDelta: Offset(0, direction * 80.0),
+              ),
+            );
+            await tester.pump(const Duration(milliseconds: 80));
+          }
+
+          if (withTail) {
+            for (final distance in [
+              72.0,
+              64.0,
+              48.0,
+              32.0,
+              20.0,
+              12.0,
+              6.0,
+              3.0,
+              1.0,
+            ]) {
+              await tester.sendEventToBinding(
+                PointerScrollEvent(
+                  position: const Offset(720, 450),
+                  scrollDelta: Offset(0, direction * distance),
+                ),
+              );
+              await tester.runAsync(
+                () => Future<void>.delayed(const Duration(milliseconds: 20)),
+              );
+              await tester.pump(const Duration(milliseconds: 16));
+            }
+          }
+
+          await tester.pumpAndSettle();
+          await _ready(tester, tools);
+          await tester.pump(const Duration(milliseconds: 300));
+        }
+
         Future<void> pan(double distance) async {
           await tools.scrollVertically(distance);
           await tester.pumpAndSettle();
@@ -266,7 +323,7 @@ void main() {
         expect(tools.pageNumber, 1);
         expect(controller().visibleRect.top, greaterThan(before));
         await pan(-100000);
-        await wheel(const Offset(0, -1));
+        await turn(-1);
         expect(tools.pageNumber, 1, reason: 'The first page is a boundary');
         await pan(100000);
         await wheel(const Offset(40, 0));
@@ -275,12 +332,12 @@ void main() {
           1,
           reason: 'Horizontal zoomed input still pans',
         );
-        await wheel(const Offset(0, 1));
+        await turn(1, withTail: true);
         expect(tools.pageNumber, facingPages ? 3 : 2);
         expect(tools.zoom, closeTo(zoom, .001));
         expect(controller().visibleRect.top, closeTo(spread().top, .01));
         expect(reportedOffset, closeTo(0, .001));
-        await wheel(const Offset(0, -1));
+        await turn(-1, withTail: true);
         expect(tools.pageNumber, 1);
         expect(tools.zoom, closeTo(zoom, .001));
         expect(controller().visibleRect.bottom, closeTo(spread().bottom, .01));
@@ -295,7 +352,7 @@ void main() {
         expect(controller().visibleRect.top, lessThan(bottom));
         await _navigate(tester, facade.showPage(4, 0));
         await pan(100000);
-        await wheel(const Offset(0, 1));
+        await turn(1);
         expect(tools.pageNumber, 5, reason: 'The last page is a boundary');
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox.shrink());

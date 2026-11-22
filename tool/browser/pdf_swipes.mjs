@@ -192,23 +192,45 @@ try {
       await page.mouse.wheel(0, delta);
       await page.waitForTimeout(400);
     };
+    const wheelTurn = async direction => {
+      for (let sample = 0; sample < 8; sample++) {
+        await page.mouse.wheel(0, direction * 80);
+        await page.waitForTimeout(16);
+      }
+    };
     await wheel(40);
     await assertPage(5);
     await wheel(100000);
     await assertPage(5);
     await wheel(1);
+    await assertPage(5);
+    await wheelTurn(1);
+    const newPageText = page.getByText('Swipe page 6.', { exact: true });
+    await newPageText.waitFor();
+    const beforeTail = await newPageText.boundingBox();
+    for (const delta of [72, 64, 48, 32, 20, 12, 6, 3, 1]) {
+      await page.mouse.wheel(0, delta);
+      await page.waitForTimeout(16);
+    }
+    const afterTail = await newPageText.boundingBox();
+    assert.ok(beforeTail && afterTail && Math.abs(afterTail.y - beforeTail.y) < 1,
+      'Post-turn inertia must not move the new zoomed PDF page');
     await assertPage(6);
     await wheel(-1);
+    await assertPage(6);
+    await wheelTurn(-1);
     await assertPage(5);
     await wheel(-40);
     await assertPage(5);
     await wheel(-100000);
     await assertPage(5);
     await wheel(-1);
+    await assertPage(5);
+    await wheelTurn(-1);
     await assertPage(4);
     await assertZoom(true);
     assert.deepEqual(errors, []);
-    console.log(`PASS: ${width}px zoomed PDF wheel pans within pages and turns at both edges`);
+    console.log(`PASS: ${width}px zoomed PDF wheel resistance, boundary turns, and inertia suppression`);
     if (input === 'mouse') {
       await setControlsVisible(false);
       // Each interrupted drag must cover enough distance to pass the next
