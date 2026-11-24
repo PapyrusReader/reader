@@ -2,9 +2,11 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:papyrus_reader/papyrus_reader.dart';
+import 'package:papyrus_reader/src/presentation/reader_page_wheel.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -162,6 +164,98 @@ void main() {
         expect(find.byTooltip('Next'), findsNothing);
       },
     );
+
+    for (final width in [400.0, 1200.0]) {
+      testWidgets('wheel feedback clears measured controls at width $width', (
+        tester,
+      ) async {
+        final toolbarHeight = ValueNotifier<double>(96);
+        addTearDown(toolbarHeight.dispose);
+        final engine = _UiReaderEngine(
+          viewportBuilder: (_, _) => ReaderPageWheel(
+            resistance: true,
+            canTurn: (_) => true,
+            onTurn: (_) async {},
+            child: const SizedBox.expand(key: ValueKey('wheel-page')),
+          ),
+        );
+        final controller = controllerFor([engine]);
+        addTearDown(controller.dispose);
+        await pumpReader(
+          tester,
+          document: document('Resistance'),
+          controller: controller,
+          size: Size(width, 800),
+          textScale: 2,
+          showControls: false,
+          builders: ReaderUiBuilders(
+            toolbar: (_, _) => ValueListenableBuilder<double>(
+              valueListenable: toolbarHeight,
+              builder: (_, height, _) => SizedBox(height: height),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final page = find.byKey(const ValueKey('wheel-page'));
+        final pageBounds = tester.getRect(page);
+        final wheelState = tester.state(find.byType(ReaderPageWheel));
+        final locator = controller.snapshot.locator;
+        final indicator = find.descendant(
+          of: find.byType(ReaderPageWheel),
+          matching: find.byType(RotatedBox),
+        );
+
+        Future<void> scroll(double delta) async {
+          await tester.sendEventToBinding(
+            PointerScrollEvent(
+              position: pageBounds.center,
+              scrollDelta: Offset(0, delta),
+            ),
+          );
+          await tester.pump();
+        }
+
+        await scroll(-80);
+        final hiddenTop = tester.getRect(indicator).top;
+        await toggleReaderControls(tester);
+        await tester.pump();
+        final toolbar = find.byKey(const ValueKey('reader-toolbar'));
+        expect(
+          tester.getRect(indicator).top,
+          greaterThan(tester.getRect(toolbar).bottom),
+        );
+        toolbarHeight.value = 160;
+        await tester.pump();
+        await tester.pump();
+        expect(
+          tester.getRect(indicator).top,
+          greaterThan(tester.getRect(toolbar).bottom),
+          reason:
+              'Internal toolbar resizing must update feedback without resizing the page',
+        );
+        expect(tester.getRect(page), pageBounds);
+        expect(tester.state(find.byType(ReaderPageWheel)), same(wheelState));
+
+        await scroll(160);
+        final footer = find.byKey(const ValueKey('reader-progress-controls'));
+        expect(
+          tester.getRect(indicator).bottom,
+          lessThan(tester.getRect(footer).top),
+        );
+        await toggleReaderControls(tester);
+        await tester.pump();
+        expect(
+          tester.getRect(indicator).bottom,
+          closeTo(pageBounds.bottom - 12, .01),
+        );
+        await scroll(-160);
+        expect(tester.getRect(indicator).top, hiddenTop);
+        expect(tester.getRect(page), pageBounds);
+        expect(controller.snapshot.locator, locator);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      });
+    }
 
     testWidgets('custom snapshot viewports refresh without losing state', (
       tester,

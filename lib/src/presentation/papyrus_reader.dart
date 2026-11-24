@@ -18,6 +18,7 @@ import '../domain/reader_types.dart';
 import '../engine/reader_engine_registry.dart';
 import 'reader_material_theme.dart';
 import 'reader_controls.dart';
+import 'reader_chrome_insets.dart';
 import 'reader_pdf_search_panel.dart';
 import 'reader_surface.dart';
 import 'reader_contents_panel.dart';
@@ -82,6 +83,10 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
   bool _hasReadableContent = false;
   _ReaderPanel _panel = _ReaderPanel.none;
   bool _controlsVisible = false;
+  final GlobalKey _toolbarBounds = GlobalKey();
+  final GlobalKey _progressBounds = GlobalKey();
+  EdgeInsets _chromeInsets = EdgeInsets.zero;
+  bool _chromeMeasurementScheduled = false;
   double? _dragProgress;
   bool _draggingProgress = false;
   int _seekRevision = 0;
@@ -645,6 +650,7 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
   ) {
     return LayoutBuilder(
       builder: (context, constraints) {
+        _scheduleChromeMeasurement();
         final isWide = constraints.maxWidth >= theme.compactBreakpoint;
         final compactPdf =
             _controller.pdfTools != null &&
@@ -684,45 +690,53 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
                     key: const ValueKey('reader-content'),
                     child: FocusTraversalOrder(
                       order: const NumericFocusOrder(3),
-                      child: _readingSurface(context, snapshot, isWide),
+                      child: ReaderChromeInsets(
+                        insets: _controlsVisible
+                            ? _chromeInsets
+                            : EdgeInsets.zero,
+                        child: _readingSurface(context, snapshot, isWide),
+                      ),
                     ),
                   ),
                   PositionedDirectional(
                     bottom: 0,
                     start: 0,
                     end: 0,
-                    child: _chromeVisibility(
-                      child: _overlayBar(
-                        theme,
-                        Center(
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 1000),
-                            child: FocusTraversalOrder(
-                              key: const ValueKey('reader-progress-controls'),
-                              order: const NumericFocusOrder(4),
-                              child: ReaderProgressControls(
-                                progress:
-                                    _dragProgress ??
-                                    _progressOf(snapshot.locator),
-                                locationLabel: _controller.pdfTools == null
-                                    ? snapshot.locationLabel
-                                    : null,
-                                onProgressChangeStart: _startProgressDrag,
-                                onProgressChanged: (value) => setState(() {
-                                  _draggingProgress = true;
-                                  _dragProgress = value;
-                                }),
-                                onProgressChangeEnd: _goToProgress,
-                                onPrevious: _goPrevious,
-                                onNext: _goNext,
-                                enabled: true,
-                                theme: theme,
+                    child: _measuredChrome(
+                      _progressBounds,
+                      _chromeVisibility(
+                        child: _overlayBar(
+                          theme,
+                          Center(
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 1000),
+                              child: FocusTraversalOrder(
+                                key: const ValueKey('reader-progress-controls'),
+                                order: const NumericFocusOrder(4),
+                                child: ReaderProgressControls(
+                                  progress:
+                                      _dragProgress ??
+                                      _progressOf(snapshot.locator),
+                                  locationLabel: _controller.pdfTools == null
+                                      ? snapshot.locationLabel
+                                      : null,
+                                  onProgressChangeStart: _startProgressDrag,
+                                  onProgressChanged: (value) => setState(() {
+                                    _draggingProgress = true;
+                                    _dragProgress = value;
+                                  }),
+                                  onProgressChangeEnd: _goToProgress,
+                                  onPrevious: _goPrevious,
+                                  onNext: _goNext,
+                                  enabled: true,
+                                  theme: theme,
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                        border: Border(
-                          top: BorderSide(color: theme.dividerColor),
+                          border: Border(
+                            top: BorderSide(color: theme.dividerColor),
+                          ),
                         ),
                       ),
                     ),
@@ -730,50 +744,55 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
                   Positioned.fill(
                     child: Column(
                       children: [
-                        _chromeVisibility(
-                          child: FocusTraversalOrder(
-                            key: const ValueKey('reader-toolbar'),
-                            order: const NumericFocusOrder(1),
-                            child: _overlayBar(
-                              theme,
-                              Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  toolbar ??
-                                      ReaderToolbar(
-                                        document: widget.document,
-                                        actions: actions,
-                                        pdfTools: _controller.pdfTools,
-                                        compactPdf: compactPdf,
-                                        onSearch: _openPdfSearch,
-                                        onBack: widget.onBack,
-                                        onTableOfContents: () => _openPanel(
-                                          context,
-                                          _ReaderPanel.tableOfContents,
-                                          isWide,
-                                          theme,
+                        _measuredChrome(
+                          _toolbarBounds,
+                          _chromeVisibility(
+                            child: FocusTraversalOrder(
+                              key: const ValueKey('reader-toolbar'),
+                              order: const NumericFocusOrder(1),
+                              child: _overlayBar(
+                                theme,
+                                Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    toolbar ??
+                                        ReaderToolbar(
+                                          document: widget.document,
+                                          actions: actions,
+                                          pdfTools: _controller.pdfTools,
+                                          compactPdf: compactPdf,
+                                          onSearch: _openPdfSearch,
+                                          onBack: widget.onBack,
+                                          onTableOfContents: () => _openPanel(
+                                            context,
+                                            _ReaderPanel.tableOfContents,
+                                            isWide,
+                                            theme,
+                                          ),
+                                          onSettings: () => _openPanel(
+                                            context,
+                                            _ReaderPanel.settings,
+                                            isWide,
+                                            theme,
+                                          ),
+                                          tocFocusNode: _tocButtonFocusNode,
+                                          settingsFocusNode:
+                                              _settingsButtonFocusNode,
+                                          theme: theme,
+                                          isWide: isWide,
                                         ),
-                                        onSettings: () => _openPanel(
-                                          context,
-                                          _ReaderPanel.settings,
-                                          isWide,
-                                          theme,
+                                    if (_showBusy)
+                                      const LinearProgressIndicator(
+                                        key: ValueKey(
+                                          'reader-command-progress',
                                         ),
-                                        tocFocusNode: _tocButtonFocusNode,
-                                        settingsFocusNode:
-                                            _settingsButtonFocusNode,
-                                        theme: theme,
-                                        isWide: isWide,
+                                        minHeight: 2,
                                       ),
-                                  if (_showBusy)
-                                    const LinearProgressIndicator(
-                                      key: ValueKey('reader-command-progress'),
-                                      minHeight: 2,
-                                    ),
-                                ],
-                              ),
-                              border: Border(
-                                bottom: BorderSide(color: theme.dividerColor),
+                                  ],
+                                ),
+                                border: Border(
+                                  bottom: BorderSide(color: theme.dividerColor),
+                                ),
                               ),
                             ),
                           ),
@@ -859,6 +878,37 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
       },
     );
   }
+
+  void _scheduleChromeMeasurement() {
+    if (_chromeMeasurementScheduled) return;
+
+    _chromeMeasurementScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _chromeMeasurementScheduled = false;
+
+      if (!mounted) return;
+
+      final insets = _controlsVisible
+          ? EdgeInsets.only(
+              top: _toolbarBounds.currentContext?.size?.height ?? 0,
+              bottom: _progressBounds.currentContext?.size?.height ?? 0,
+            )
+          : EdgeInsets.zero;
+
+      if (insets != _chromeInsets) {
+        setState(() => _chromeInsets = insets);
+      }
+    });
+  }
+
+  Widget _measuredChrome(GlobalKey key, Widget child) =>
+      NotificationListener<SizeChangedLayoutNotification>(
+        onNotification: (_) {
+          _scheduleChromeMeasurement();
+          return false;
+        },
+        child: SizeChangedLayoutNotifier(key: key, child: child),
+      );
 
   Widget _chromeVisibility({required Widget child}) => Visibility(
     visible: _controlsVisible,

@@ -106,13 +106,21 @@ In paginated text formats, mouse drags starting in blank space, including the
 outer window margins, turn pages;
 drags starting on rendered text remain selection gestures. Mouse turns use the
 same page controller as touch and can interrupt an unfinished turn.
-Wheel input turns paginated pages immediately without changing the animation
-preference. Small nonzero deltas count as a turn; same-direction bursts are
-limited to one turn per 120 ms, while reversing direction responds immediately.
+Wheel input turns paginated text pages immediately: small nonzero deltas count
+as a turn, same-direction bursts are limited to one turn per 120 ms, and reversing
+direction responds immediately. Paginated PDFs, including converted comic archives,
+accumulate scroll distance before turning, with an axis lock to tolerate diagonal
+touchpad drift. Resistance feedback
+persists between samples, uses theme colors, and clears the measured top and bottom
+controls without resizing the viewport. It is hidden when page-turn animation or
+system motion is disabled. Continued deliberate input can build one subsequent
+turn while navigation completes. After a turn, a decaying wheel tail is consumed;
+a fresh impulse, direction change, or quiet gap releases the momentum filter.
+This is a heuristic because browser wheel events do not identify momentum phases.
 Zoomed PDFs pan within the current spread; scrolling outward at its top or bottom
-turns the page without animation. Forward turns open at the top, backward turns
-at the bottom, preserving zoom. Horizontal zoomed panning, continuous readers,
-and modifier-key zoom retain native wheel input.
+builds resistance before turning without animation. Forward turns open at the top,
+backward turns at the bottom, preserving zoom. Horizontal zoomed panning,
+continuous readers, and modifier-key zoom retain native wheel input.
 Continuous EPUB uses a full-width scroll surface with centered text and a viewport-edge
 scrollbar. Its chunk extents use the rendered fragment heights, including text reshaping
 at paragraph cuts. Outward wheel input at a chapter edge opens the adjacent chapter;

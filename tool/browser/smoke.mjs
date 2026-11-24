@@ -391,11 +391,19 @@ try {
   await closeSettings();
   await page.mouse.move(450, 350);
   await page.mouse.wheel(0, 180);
+  await settle();
+  assert.ok(await page.getByText('Page 2 of 3.', { exact: true }).isVisible(),
+    'A small PDF wheel movement must not turn the page');
+  for (let sample = 0; sample < 6; sample++) {
+    await page.mouse.wheel(0, 80);
+    await page.waitForTimeout(16);
+  }
   await page.getByText('Page 3 of 3.', { exact: true }).waitFor();
   await settle();
-  // Discrete PDF wheel turns intentionally debounce input for 250 ms.
-  await page.waitForTimeout(260);
-  await page.mouse.wheel(0, -180);
+  for (let sample = 0; sample < 8; sample++) {
+    await page.mouse.wheel(0, -80);
+    await page.waitForTimeout(16);
+  }
   await page.getByText('Page 2 of 3.', { exact: true }).waitFor();
   await settle();
   await openSettings();

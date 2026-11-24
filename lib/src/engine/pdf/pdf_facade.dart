@@ -1054,6 +1054,10 @@ final class _PdfrxFacade extends PdfReaderTools
 
           final pages = _pagesController;
           return ReaderPageWheel(
+            resistance: configuration.layoutMode == ReaderLayoutMode.paginated,
+            showResistance:
+                configuration.pageTurnAnimation &&
+                !MediaQuery.disableAnimationsOf(context),
             canTurn: _canTurnWithWheel,
             onTurn: (direction) => _turnSpread(direction, fromWheel: true),
             child: applyPdfBrightness(

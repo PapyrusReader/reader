@@ -141,8 +141,24 @@ export async function checkFormats(browser, origin, reader) {
       await page.mouse.move(550, 400);
       await page.mouse.wheel(0, 1);
       await page.waitForTimeout(500);
-      assert.notEqual(await location(), initial, `${format} a small wheel movement must turn the page`);
-      await page.mouse.wheel(0, -1);
+      const fixedPages = ['pdf', 'cbz', 'cbr'].includes(format);
+      if (fixedPages) {
+        assert.equal(await location(), initial, `${format} small wheel movements must not turn the page`);
+        for (let sample = 0; sample < 8; sample++) {
+          await page.mouse.wheel(0, 80);
+          await page.waitForTimeout(16);
+        }
+        await page.waitForTimeout(100);
+      }
+      assert.notEqual(await location(), initial, `${format} wheel input must turn the page`);
+      if (fixedPages) {
+        for (let sample = 0; sample < 8; sample++) {
+          await page.mouse.wheel(0, -80);
+          await page.waitForTimeout(16);
+        }
+      } else {
+        await page.mouse.wheel(0, -1);
+      }
       await page.waitForTimeout(500);
       assert.equal(await location(), initial, `${format} reverse wheel input must restore the initial page`);
       await next.click({ force: true });
