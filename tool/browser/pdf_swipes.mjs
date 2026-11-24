@@ -204,17 +204,35 @@ try {
     await assertPage(5);
     await wheel(1);
     await assertPage(5);
+    await page.evaluate(() => {
+      window.inertiaProbe = { beforeTail: null, samples: [] };
+      const observe = event => {
+        window.inertiaProbe.samples.push({ time: performance.now(), delta: event.deltaY });
+        if (event.deltaY === 72) {
+          const text = [...document.querySelectorAll('flt-semantics')]
+            .findLast(element => element.textContent === 'Swipe page 6.');
+          window.inertiaProbe.beforeTail = text?.getBoundingClientRect().toJSON() ?? null;
+        }
+        if (event.deltaY === 1) window.removeEventListener('wheel', observe, true);
+      };
+      window.addEventListener('wheel', observe, { capture: true });
+    });
     await wheelTurn(1);
-    const newPageText = page.getByText('Swipe page 6.', { exact: true });
-    await newPageText.waitFor();
-    const beforeTail = await newPageText.boundingBox();
+    // Keep the stroke and its tail continuous. Locator polling here can exceed
+    // the reader's idle cutoff on CI, turning the tail into fresh panning input.
+    // Capture the starting geometry in the browser before the first tail event.
     for (const delta of [72, 64, 48, 32, 20, 12, 6, 3, 1]) {
       await page.mouse.wheel(0, delta);
       await page.waitForTimeout(16);
     }
+    const newPageText = page.getByText('Swipe page 6.', { exact: true });
+    await newPageText.waitFor();
+    const { beforeTail, samples } = await page.evaluate(() => window.inertiaProbe);
     const afterTail = await newPageText.boundingBox();
     assert.ok(beforeTail && afterTail && Math.abs(afterTail.y - beforeTail.y) < 1,
-      'Post-turn inertia must not move the new zoomed PDF page');
+      `Post-turn inertia must not move the new zoomed PDF page: ${JSON.stringify({
+        beforeTail, afterTail, samples,
+      })}`);
     await assertPage(6);
     await wheel(-1);
     await assertPage(6);
