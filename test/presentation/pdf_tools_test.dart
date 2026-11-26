@@ -1240,11 +1240,12 @@ void main() {
       return createPdfrxFacade(bytes!, sourceName: 'shell-tools');
     });
     final tools = facade! as PdfReaderTools;
+    final opening = Completer<PdfFacade>();
     final controller = ReaderController(
       registry: ReaderEngineRegistry([
         ReaderEngineRegistration(
           formats: const {ReaderFormat.pdf},
-          factory: () => PdfReaderEngine(facadeFactory: (_) async => facade),
+          factory: () => PdfReaderEngine(facadeFactory: (_) => opening.future),
         ),
       ]),
     );
@@ -1261,9 +1262,14 @@ void main() {
             loadBytes: () async => bytes!,
           ),
           onActivity: events.add,
+          onBack: () {},
         ),
       ),
     );
+    final backIcon = find.byType(BackButtonIcon);
+    final openingIcon = tester.getRect(backIcon);
+    final openingTarget = tester.getRect(find.byType(BackButton));
+    opening.complete(facade);
     await _ready(tester, tools);
     await tools.setZoom(1.37);
     await tester.pumpAndSettle();
@@ -1312,6 +1318,8 @@ void main() {
 
     final toolbar = find.byKey(const ValueKey('reader-toolbar'));
     final progress = find.byKey(const ValueKey('reader-progress-controls'));
+    expect(tester.getRect(backIcon), openingIcon);
+    expect(tester.getRect(find.byType(BackButton)), openingTarget);
     final toolbarRect = tester.getRect(toolbar);
     final progressRect = tester.getRect(progress);
     final viewportRect = tester.getRect(find.byType(PdfViewer));

@@ -68,6 +68,65 @@ double readerToolbarHeight(
   );
 }
 
+/// Shows loading content with Back in the default reader toolbar's leading slot.
+final class ReaderOpeningView extends StatelessWidget {
+  const ReaderOpeningView({
+    super.key,
+    required this.child,
+    this.onBack,
+    this.theme,
+  });
+
+  final Widget child;
+  final VoidCallback? onBack;
+  final ReaderThemeData? theme;
+
+  @override
+  Widget build(BuildContext context) {
+    final back = onBack;
+    if (back == null) return child;
+
+    final readerTheme = theme ?? ReaderThemeData.fromTheme(Theme.of(context));
+    return LayoutBuilder(
+      builder: (context, constraints) => Stack(
+        fit: StackFit.expand,
+        children: [
+          child,
+          PositionedDirectional(
+            top: 0,
+            start: 0,
+            child: _ReaderToolbarBackButton(
+              onPressed: back,
+              height: readerToolbarHeight(
+                context,
+                readerTheme,
+                constraints.maxWidth >= readerTheme.compactBreakpoint,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+final class _ReaderToolbarBackButton extends StatelessWidget {
+  const _ReaderToolbarBackButton({
+    required this.onPressed,
+    required this.height,
+  });
+
+  final VoidCallback onPressed;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: AppBarTheme.of(context).leadingWidth ?? kToolbarHeight,
+    height: height,
+    child: BackButton(onPressed: onPressed),
+  );
+}
+
 final class ReaderToolbar extends StatelessWidget {
   const ReaderToolbar({
     super.key,
@@ -101,13 +160,17 @@ final class ReaderToolbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final height = readerToolbarHeight(context, theme, isWide);
+    final back = onBack;
+    final leading = back == null
+        ? null
+        : _ReaderToolbarBackButton(onPressed: back, height: height);
     if (pdfTools case final tools?) {
       return SizedBox(
         height: height,
         child: ReaderPdfControls(
           tools: tools,
           compact: compactPdf,
-          onBack: onBack,
+          leading: leading,
           onSearch: onSearch!,
           actions: [
             ...actions,
@@ -153,7 +216,7 @@ final class ReaderToolbar extends StatelessWidget {
         foregroundColor: theme.onChromeColor,
         elevation: 0,
         scrolledUnderElevation: 0,
-        leading: onBack == null ? null : BackButton(onPressed: onBack),
+        leading: leading,
         actions: [
           ...actions,
           ReaderIconButton(

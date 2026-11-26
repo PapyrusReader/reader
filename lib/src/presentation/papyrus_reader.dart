@@ -547,22 +547,10 @@ final class _PapyrusReaderState extends State<PapyrusReader> {
             ),
           );
 
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        content,
-        if (widget.onBack != null)
-          PositionedDirectional(
-            top: 0,
-            start: 0,
-            child: ReaderIconButton(
-              icon: Icons.arrow_back_rounded,
-              tooltip: 'Back',
-              onPressed: widget.onBack,
-              theme: theme,
-            ),
-          ),
-      ],
+    return ReaderOpeningView(
+      onBack: widget.onBack,
+      theme: theme,
+      child: content,
     );
   }
 

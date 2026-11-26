@@ -10,7 +10,7 @@ final class ReaderPdfControls extends StatefulWidget {
   const ReaderPdfControls({
     required this.tools,
     required this.onSearch,
-    this.onBack,
+    this.leading,
     this.actions = const [],
     this.compact = false,
     super.key,
@@ -18,7 +18,7 @@ final class ReaderPdfControls extends StatefulWidget {
 
   final PdfReaderTools tools;
   final VoidCallback onSearch;
-  final VoidCallback? onBack;
+  final Widget? leading;
   final List<Widget> actions;
   final bool compact;
 
@@ -87,7 +87,7 @@ final class _ReaderPdfControlsState extends State<ReaderPdfControls> {
 
         return Row(
           children: [
-            if (widget.onBack != null) BackButton(onPressed: widget.onBack),
+            ?widget.leading,
             const Spacer(),
             if (!compact) ...[
               IconButton(

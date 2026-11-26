@@ -30,5 +30,6 @@ export 'src/engine/pdf/pdf_facade.dart'
         PdfViewportConfiguration;
 export 'src/engine/pdf/pdf_reader_engine.dart';
 export 'src/presentation/papyrus_reader.dart';
+export 'src/presentation/reader_controls.dart' show ReaderOpeningView;
 export 'src/presentation/reader_theme_data.dart';
 export 'src/presentation/reader_ui_builders.dart';
