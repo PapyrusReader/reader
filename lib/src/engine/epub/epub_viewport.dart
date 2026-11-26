@@ -1325,23 +1325,31 @@ final class _EpubViewportState extends State<EpubViewport> {
                                   (direction < 0 && !neighbor.complete)) {
                                 return const ReaderLoading();
                               }
-                              return _spread(
-                                neighbor.pages,
-                                direction > 0
-                                    ? 0
-                                    : (neighbor.pages.length / columns).ceil() -
-                                          1,
-                                columns,
-                                displayPreferences,
-                                spine: spine,
+                              return SelectionContainer.disabled(
+                                child: _spread(
+                                  neighbor.pages,
+                                  direction > 0
+                                      ? 0
+                                      : (neighbor.pages.length / columns)
+                                                .ceil() -
+                                            1,
+                                  columns,
+                                  displayPreferences,
+                                  spine: spine,
+                                ),
                               );
                             }
-                            return _spread(
+                            final spread = _spread(
                               pages,
                               local,
                               columns,
                               displayPreferences,
                             );
+                            // Offscreen spreads can be kept alive with a zero paint transform.
+                            // Only the visible text can participate in a touch selection.
+                            return local == _pageIndex
+                                ? spread
+                                : SelectionContainer.disabled(child: spread);
                           },
                         ),
                       ),
