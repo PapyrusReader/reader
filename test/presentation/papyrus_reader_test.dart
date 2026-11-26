@@ -771,21 +771,27 @@ void main() {
       var backCalls = 0;
       addTearDown(controller.dispose);
 
+      tester.view.padding = const FakeViewPadding(top: 30, left: 12);
+      addTearDown(tester.view.resetPadding);
       await pumpReader(
         tester,
         document: document('Loading'),
+        textScale: 2,
         controller: controller,
         onBack: () => backCalls++,
       );
 
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
       expect(find.byTooltip('Back'), findsOneWidget);
+      final backIcon = find.byType(BackButtonIcon);
+      final openingIcon = tester.getRect(backIcon);
+      final openingTarget = tester.getRect(find.byType(BackButton));
       await tester.tap(find.byTooltip('Back'));
       expect(backCalls, 1);
       expect(find.text('Opening The Loading Reader…'), findsNothing);
       expect(
         tester.getCenter(find.byType(CircularProgressIndicator)),
-        const Offset(300, 400),
+        const Offset(306, 415),
       );
 
       gate.complete();
@@ -796,6 +802,8 @@ void main() {
       expect(find.byTooltip('Reading settings'), findsNothing);
       expect(find.byTooltip('Table of contents'), findsNothing);
       await toggleReaderControls(tester);
+      expect(tester.getRect(backIcon), openingIcon);
+      expect(tester.getRect(find.byType(BackButton)), openingTarget);
       expect(find.byTooltip('Reading settings'), findsOneWidget);
     });
 
