@@ -9,6 +9,69 @@ import '../support/in_process_epub_worker.dart';
 import '../support/synthetic_epub.dart';
 
 void main() {
+  testWidgets('touch selects a word after a page turn within a long chapter', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 844);
+    addTearDown(tester.view.reset);
+    final engine = testEpubEngine();
+    ReaderSelection? saved;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(platform: TargetPlatform.android),
+        home: PapyrusReader(
+          initialPreferences: const ReaderPreferences(
+            fontSize: 16,
+            columnMode: ReaderColumnMode.single,
+          ),
+          document: ReaderDocument(
+            id: 'long-chapter',
+            format: ReaderFormat.epub,
+            loadBytes: () async =>
+                syntheticEpub(longChapter: true, singleSpine: true),
+          ),
+          registry: ReaderEngineRegistry([
+            ReaderEngineRegistration(
+              formats: const {ReaderFormat.epub},
+              factory: () => engine,
+            ),
+          ]),
+          onAnnotate: (selection) => saved = selection,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final text = find.byWidgetPredicate(
+      (widget) =>
+          widget is RichText &&
+          widget.text.toPlainText().startsWith('Paragraph '),
+    );
+    // Reproduce a page kept alive by the platform after it leaves the viewport.
+    final keepAlive = KeepAliveHandle();
+    addTearDown(keepAlive.dispose);
+    KeepAliveNotification(
+      keepAlive,
+    ).dispatch(tester.element(text.hitTestable().first));
+    await tester.pump();
+    await pumpReaderCommand(tester, engine.goNext());
+    expect(engine.locator.textOffset, greaterThan(0));
+    final paragraph = tester.renderObject<RenderParagraph>(
+      text.hitTestable().at(1),
+    );
+    final target = paragraph
+        .getBoxesForSelection(
+          const TextSelection(baseOffset: 1, extentOffset: 2),
+        )
+        .first;
+    await tester.longPressAt(paragraph.localToGlobal(target.toRect().center));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.text('Annotate'));
+    await tester.pumpAndSettle();
+    expect(saved?.text, 'Paragraph');
+  });
+
   for (final (kind, animation) in [
     (PointerDeviceKind.mouse, true),
     (PointerDeviceKind.touch, true),
